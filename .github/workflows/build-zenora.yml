@@ -1,4 +1,4 @@
-name: Native ARM RootFS Builder
+name: Build ARM RootFS
 
 on:
   workflow_dispatch:
@@ -10,11 +10,11 @@ jobs:
     strategy:
       matrix:
         arch: [armv7l, aarch64]
-    runs-on: [self-hosted, ARM]  # نیاز به runner خودمیزبان ARM دارد
-    name: "Build native ${{ matrix.arch }} rootfs"
+    runs-on: [self-hosted, ARM]
+    name: "Build ${{ matrix.arch }} rootfs"
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Setup environment
@@ -25,7 +25,8 @@ jobs:
             curl \
             git \
             sudo \
-            fakeroot
+            fakeroot \
+            archlinux-keyring
 
       - name: Create rootfs directory
         run: |
@@ -33,7 +34,7 @@ jobs:
           sudo mkdir -p "${ROOTFS_DIR}"
           sudo chown runner:runner "${ROOTFS_DIR}"
 
-      - name: Get Arch Linux ARM keyring
+      - name: Configure pacman for Arch Linux ARM
         run: |
           case "${{ matrix.arch }}" in
             armv7l)
@@ -44,23 +45,17 @@ jobs:
               ;;
           esac
           
-          wget "${MIRROR}/core/archlinuxarm-keyring-20240105-1-any.pkg.tar.xz"
-          sudo pacman -U --noconfirm archlinuxarm-keyring-*.pkg.tar.xz
+          echo -e "[archlinuxarm]\nSigLevel = Never\nServer = ${MIRROR}" | sudo tee -a /etc/pacman.conf
+          sudo pacman -Sy --noconfirm archlinuxarm-keyring
 
       - name: Bootstrap base system
         run: |
-          case "${{ matrix.arch }}" in
-            armv7l)
-              PKGS="base archlinuxarm-keyring"
-              ;;
-            aarch64)
-              PKGS="base archlinuxarm-keyring"
-              ;;
-          esac
-
+          ROOTFS_DIR="/rootfs-${{ matrix.arch }}"
+          
           sudo pacstrap -C /etc/pacman.conf -G -M -K \
-            "/rootfs-${{ matrix.arch }}" \
-            ${PKGS} \
+            "${ROOTFS_DIR}" \
+            base \
+            archlinuxarm-keyring \
             base-devel \
             sudo \
             curl \
@@ -69,34 +64,42 @@ jobs:
             vim \
             nano
 
-      - name: Configure rootfs
+      - name: Basic system configuration
         run: |
           ROOTFS_DIR="/rootfs-${{ matrix.arch }}"
           
           # تنظیمات پایه
-          echo "Server = http://mirror.archlinuxarm.org/$arch/$repo" > "${ROOTFS_DIR}/etc/pacman.d/mirrorlist"
-          echo "LANG=en_US.UTF-8" > "${ROOTFS_DIR}/etc/locale.conf"
-          echo "en_US.UTF-8 UTF-8" >> "${ROOTFS_DIR}/etc/locale.gen"
+          echo "Server = http://mirror.archlinuxarm.org/\$arch/\$repo" | sudo tee "${ROOTFS_DIR}/etc/pacman.d/mirrorlist"
+          echo "LANG=en_US.UTF-8" | sudo tee "${ROOTFS_DIR}/etc/locale.conf"
+          echo "en_US.UTF-8 UTF-8" | sudo tee -a "${ROOTFS_DIR}/etc/locale.gen"
           
-          # اجرای تنظیمات داخل chroot
+          # تنظیمات داخل chroot
           sudo arch-chroot "${ROOTFS_DIR}" /bin/bash -c "
             locale-gen
-            hwclock --systohc --utc
             ln -sf /usr/share/zoneinfo/UTC /etc/localtime
             echo 'root:root' | chpasswd
           "
 
-          # ایجاد کاربر غیر-root
+      - name: Create user and configure sudo
+        run: |
+          ROOTFS_DIR="/rootfs-${{ matrix.arch }}"
+          
           sudo arch-chroot "${ROOTFS_DIR}" /bin/bash -c "
             useradd -m -G wheel -s /bin/bash user
             echo 'user:user' | chpasswd
             echo '%wheel ALL=(ALL:ALL) ALL' > /etc/sudoers.d/wheel
+            chmod 440 /etc/sudoers.d/wheel
           "
 
-          # پاکسازی
+      - name: Cleanup rootfs
+        run: |
+          ROOTFS_DIR="/rootfs-${{ matrix.arch }}"
+          
           sudo rm -rf "${ROOTFS_DIR}/var/cache/pacman/pkg"/*
           sudo rm -f "${ROOTFS_DIR}/etc/machine-id"
           sudo touch "${ROOTFS_DIR}/etc/machine-id"
+          sudo rm -rf "${ROOTFS_DIR}/var/log"/*
+          sudo find "${ROOTFS_DIR}/usr/share/man" -type f -delete
 
       - name: Package rootfs
         run: |
@@ -114,13 +117,15 @@ jobs:
             archlinux-${{ matrix.arch }}-rootfs-*.tar.gz
             archlinux-${{ matrix.arch }}-rootfs-*.sha256
 
-      - name: Create release
+      - name: Create GitHub release
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: native-arm-rootfs-${{ github.run_id }}
+          tag_name: arm-rootfs-${{ github.run_id }}
           files: |
-            archlinux-*-rootfs-*.tar.gz
-            archlinux-*-rootfs-*.sha256
+            archlinux-armv7l-rootfs-*.tar.gz
+            archlinux-armv7l-rootfs-*.sha256
+            archlinux-aarch64-rootfs-*.tar.gz
+            archlinux-aarch64-rootfs-*.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
