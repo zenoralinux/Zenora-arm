@@ -1,109 +1,45 @@
-name: Build ARM RootFS with QEMU
+name: Build ARM RootFS with Docker
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 0 * * 0'  # اجرای هفتگی
+    - cron: '0 0 * * 0'
 
 jobs:
   build-rootfs:
     strategy:
       matrix:
-        arch: [armv7l, aarch64]
+        arch: [arm32v7, arm64v8]
     runs-on: ubuntu-latest
-    name: "Build ${{ matrix.arch }} rootfs with QEMU"
+    name: "Build ${{ matrix.arch }} rootfs with Docker"
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Prepare environment
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            qemu-user-static \
-            binfmt-support \
-            debootstrap \
-            arch-install-scripts \
-            wget \
-            curl \
-            tar \
-            gzip
+      - name: Build minimal rootfs
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/${{ matrix.arch }}
+          outputs: type=local,dest=./rootfs
+          tags: rootfs-builder
+          build-args: |
+            ARCH=${{ matrix.arch }}
 
-      - name: Build rootfs using debootstrap (for Debian/Ubuntu base)
-        if: matrix.arch == 'armv7l'
+      - name: Package rootfs
         run: |
-          ROOTFS_DIR="ubuntu-armhf-rootfs"
-          mkdir -p "${ROOTFS_DIR}"
-          sudo qemu-debootstrap \
-            --arch=armhf \
-            --variant=minbase \
-            focal \
-            "${ROOTFS_DIR}" \
-            http://ports.ubuntu.com/ubuntu-ports
-          
-          # Basic setup
-          sudo chroot "${ROOTFS_DIR}" /bin/bash -c "
-            apt-get update
-            apt-get install -y sudo curl wget
-            useradd -m -s /bin/bash user
-            echo 'user:user' | chpasswd
-            echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
-          "
-          
-          tar -czf "ubuntu-armhf-rootfs.tar.gz" -C "${ROOTFS_DIR}" .
-
-      - name: Build rootfs using arch-install-scripts (for Arch Linux ARM)
-        if: matrix.arch == 'aarch64'
-        run: |
-          # Install prerequisites
-          sudo pacman -Sy --noconfirm --needed arch-install-scripts qemu-user-static qemu-aarch64-static
-          
-          # Create rootfs directory
-          ROOTFS_DIR="archlinux-arm64-rootfs"
-          mkdir -p "${ROOTFS_DIR}"
-          
-          # Initialize base system
-          sudo pacstrap -C /etc/pacman.conf -G -M -K \
-            -a aarch64 \
-            "${ROOTFS_DIR}" \
-            base \
-            base-devel \
-            sudo \
-            curl \
-            wget
-          
-          # Configure inside chroot
-          sudo arch-chroot "${ROOTFS_DIR}" /bin/bash -c "
-            echo 'Server = http://mirror.archlinuxarm.org/\$arch/\$repo' > /etc/pacman.d/mirrorlist
-            useradd -m -G wheel -s /bin/bash user
-            echo 'user:user' | chpasswd
-            echo '%wheel ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
-          "
-          
-          tar -czf "archlinux-arm64-rootfs.tar.gz" -C "${ROOTFS_DIR}" .
+          cd rootfs
+          tar -czf "../${{ matrix.arch }}-rootfs.tar.gz" .
+          sha256sum "../${{ matrix.arch }}-rootfs.tar.gz" > "../${{ matrix.arch }}-rootfs.sha256"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v3
         with:
           name: ${{ matrix.arch }}-rootfs
           path: |
-            *-rootfs.tar.gz
-
-      - name: Create release
-        if: github.ref == 'refs/heads/main'
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: qemu-arm-rootfs-${{ github.run_id }}
-          files: |
-            *-rootfs.tar.gz
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            ${{ matrix.arch }}-rootfs.tar.gz
+            ${{ matrix.arch }}-rootfs.sha256
