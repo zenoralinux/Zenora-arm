@@ -1,0 +1,126 @@
+name: Native ARM RootFS Builder
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 0'  # اجرای هفتگی
+
+jobs:
+  build-rootfs:
+    strategy:
+      matrix:
+        arch: [armv7l, aarch64]
+    runs-on: [self-hosted, ARM]  # نیاز به runner خودمیزبان ARM دارد
+    name: "Build native ${{ matrix.arch }} rootfs"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup environment
+        run: |
+          sudo pacman -Syu --noconfirm --needed \
+            arch-install-scripts \
+            wget \
+            curl \
+            git \
+            sudo \
+            fakeroot
+
+      - name: Create rootfs directory
+        run: |
+          ROOTFS_DIR="/rootfs-${{ matrix.arch }}"
+          sudo mkdir -p "${ROOTFS_DIR}"
+          sudo chown runner:runner "${ROOTFS_DIR}"
+
+      - name: Get Arch Linux ARM keyring
+        run: |
+          case "${{ matrix.arch }}" in
+            armv7l)
+              MIRROR="http://mirror.archlinuxarm.org/armv7h/$(uname -m)"
+              ;;
+            aarch64)
+              MIRROR="http://mirror.archlinuxarm.org/aarch64/$(uname -m)"
+              ;;
+          esac
+          
+          wget "${MIRROR}/core/archlinuxarm-keyring-20240105-1-any.pkg.tar.xz"
+          sudo pacman -U --noconfirm archlinuxarm-keyring-*.pkg.tar.xz
+
+      - name: Bootstrap base system
+        run: |
+          case "${{ matrix.arch }}" in
+            armv7l)
+              PKGS="base archlinuxarm-keyring"
+              ;;
+            aarch64)
+              PKGS="base archlinuxarm-keyring"
+              ;;
+          esac
+
+          sudo pacstrap -C /etc/pacman.conf -G -M -K \
+            "/rootfs-${{ matrix.arch }}" \
+            ${PKGS} \
+            base-devel \
+            sudo \
+            curl \
+            wget \
+            git \
+            vim \
+            nano
+
+      - name: Configure rootfs
+        run: |
+          ROOTFS_DIR="/rootfs-${{ matrix.arch }}"
+          
+          # تنظیمات پایه
+          echo "Server = http://mirror.archlinuxarm.org/$arch/$repo" > "${ROOTFS_DIR}/etc/pacman.d/mirrorlist"
+          echo "LANG=en_US.UTF-8" > "${ROOTFS_DIR}/etc/locale.conf"
+          echo "en_US.UTF-8 UTF-8" >> "${ROOTFS_DIR}/etc/locale.gen"
+          
+          # اجرای تنظیمات داخل chroot
+          sudo arch-chroot "${ROOTFS_DIR}" /bin/bash -c "
+            locale-gen
+            hwclock --systohc --utc
+            ln -sf /usr/share/zoneinfo/UTC /etc/localtime
+            echo 'root:root' | chpasswd
+          "
+
+          # ایجاد کاربر غیر-root
+          sudo arch-chroot "${ROOTFS_DIR}" /bin/bash -c "
+            useradd -m -G wheel -s /bin/bash user
+            echo 'user:user' | chpasswd
+            echo '%wheel ALL=(ALL:ALL) ALL' > /etc/sudoers.d/wheel
+          "
+
+          # پاکسازی
+          sudo rm -rf "${ROOTFS_DIR}/var/cache/pacman/pkg"/*
+          sudo rm -f "${ROOTFS_DIR}/etc/machine-id"
+          sudo touch "${ROOTFS_DIR}/etc/machine-id"
+
+      - name: Package rootfs
+        run: |
+          ROOTFS_DIR="/rootfs-${{ matrix.arch }}"
+          OUTPUT_FILE="archlinux-${{ matrix.arch }}-rootfs-$(date +%Y%m%d).tar.gz"
+          
+          sudo tar --numeric-owner --xattrs --acls -czf "${OUTPUT_FILE}" -C "${ROOTFS_DIR}" .
+          sha256sum "${OUTPUT_FILE}" > "${OUTPUT_FILE}.sha256"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: archlinux-${{ matrix.arch }}-rootfs
+          path: |
+            archlinux-${{ matrix.arch }}-rootfs-*.tar.gz
+            archlinux-${{ matrix.arch }}-rootfs-*.sha256
+
+      - name: Create release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: native-arm-rootfs-${{ github.run_id }}
+          files: |
+            archlinux-*-rootfs-*.tar.gz
+            archlinux-*-rootfs-*.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
