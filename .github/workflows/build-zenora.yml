@@ -1,4 +1,4 @@
-name: Build ARM RootFS
+name: Build ARM RootFS with QEMU
 
 on:
   workflow_dispatch:
@@ -10,122 +10,100 @@ jobs:
     strategy:
       matrix:
         arch: [armv7l, aarch64]
-    runs-on: [self-hosted, ARM]
-    name: "Build ${{ matrix.arch }} rootfs"
+    runs-on: ubuntu-latest
+    name: "Build ${{ matrix.arch }} rootfs with QEMU"
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup environment
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Prepare environment
         run: |
-          sudo pacman -Syu --noconfirm --needed \
+          sudo apt-get update
+          sudo apt-get install -y \
+            qemu-user-static \
+            binfmt-support \
+            debootstrap \
             arch-install-scripts \
             wget \
             curl \
-            git \
-            sudo \
-            fakeroot \
-            archlinux-keyring
+            tar \
+            gzip
 
-      - name: Create rootfs directory
+      - name: Build rootfs using debootstrap (for Debian/Ubuntu base)
+        if: matrix.arch == 'armv7l'
         run: |
-          ROOTFS_DIR="/rootfs-${{ matrix.arch }}"
-          sudo mkdir -p "${ROOTFS_DIR}"
-          sudo chown runner:runner "${ROOTFS_DIR}"
-
-      - name: Configure pacman for Arch Linux ARM
-        run: |
-          case "${{ matrix.arch }}" in
-            armv7l)
-              MIRROR="http://mirror.archlinuxarm.org/armv7h/$(uname -m)"
-              ;;
-            aarch64)
-              MIRROR="http://mirror.archlinuxarm.org/aarch64/$(uname -m)"
-              ;;
-          esac
+          ROOTFS_DIR="ubuntu-armhf-rootfs"
+          mkdir -p "${ROOTFS_DIR}"
+          sudo qemu-debootstrap \
+            --arch=armhf \
+            --variant=minbase \
+            focal \
+            "${ROOTFS_DIR}" \
+            http://ports.ubuntu.com/ubuntu-ports
           
-          echo -e "[archlinuxarm]\nSigLevel = Never\nServer = ${MIRROR}" | sudo tee -a /etc/pacman.conf
-          sudo pacman -Sy --noconfirm archlinuxarm-keyring
-
-      - name: Bootstrap base system
-        run: |
-          ROOTFS_DIR="/rootfs-${{ matrix.arch }}"
+          # Basic setup
+          sudo chroot "${ROOTFS_DIR}" /bin/bash -c "
+            apt-get update
+            apt-get install -y sudo curl wget
+            useradd -m -s /bin/bash user
+            echo 'user:user' | chpasswd
+            echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+          "
           
+          tar -czf "ubuntu-armhf-rootfs.tar.gz" -C "${ROOTFS_DIR}" .
+
+      - name: Build rootfs using arch-install-scripts (for Arch Linux ARM)
+        if: matrix.arch == 'aarch64'
+        run: |
+          # Install prerequisites
+          sudo pacman -Sy --noconfirm --needed arch-install-scripts qemu-user-static qemu-aarch64-static
+          
+          # Create rootfs directory
+          ROOTFS_DIR="archlinux-arm64-rootfs"
+          mkdir -p "${ROOTFS_DIR}"
+          
+          # Initialize base system
           sudo pacstrap -C /etc/pacman.conf -G -M -K \
+            -a aarch64 \
             "${ROOTFS_DIR}" \
             base \
-            archlinuxarm-keyring \
             base-devel \
             sudo \
             curl \
-            wget \
-            git \
-            vim \
-            nano
-
-      - name: Basic system configuration
-        run: |
-          ROOTFS_DIR="/rootfs-${{ matrix.arch }}"
+            wget
           
-          # تنظیمات پایه
-          echo "Server = http://mirror.archlinuxarm.org/\$arch/\$repo" | sudo tee "${ROOTFS_DIR}/etc/pacman.d/mirrorlist"
-          echo "LANG=en_US.UTF-8" | sudo tee "${ROOTFS_DIR}/etc/locale.conf"
-          echo "en_US.UTF-8 UTF-8" | sudo tee -a "${ROOTFS_DIR}/etc/locale.gen"
-          
-          # تنظیمات داخل chroot
+          # Configure inside chroot
           sudo arch-chroot "${ROOTFS_DIR}" /bin/bash -c "
-            locale-gen
-            ln -sf /usr/share/zoneinfo/UTC /etc/localtime
-            echo 'root:root' | chpasswd
-          "
-
-      - name: Create user and configure sudo
-        run: |
-          ROOTFS_DIR="/rootfs-${{ matrix.arch }}"
-          
-          sudo arch-chroot "${ROOTFS_DIR}" /bin/bash -c "
+            echo 'Server = http://mirror.archlinuxarm.org/\$arch/\$repo' > /etc/pacman.d/mirrorlist
             useradd -m -G wheel -s /bin/bash user
             echo 'user:user' | chpasswd
-            echo '%wheel ALL=(ALL:ALL) ALL' > /etc/sudoers.d/wheel
-            chmod 440 /etc/sudoers.d/wheel
+            echo '%wheel ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
           "
-
-      - name: Cleanup rootfs
-        run: |
-          ROOTFS_DIR="/rootfs-${{ matrix.arch }}"
           
-          sudo rm -rf "${ROOTFS_DIR}/var/cache/pacman/pkg"/*
-          sudo rm -f "${ROOTFS_DIR}/etc/machine-id"
-          sudo touch "${ROOTFS_DIR}/etc/machine-id"
-          sudo rm -rf "${ROOTFS_DIR}/var/log"/*
-          sudo find "${ROOTFS_DIR}/usr/share/man" -type f -delete
-
-      - name: Package rootfs
-        run: |
-          ROOTFS_DIR="/rootfs-${{ matrix.arch }}"
-          OUTPUT_FILE="archlinux-${{ matrix.arch }}-rootfs-$(date +%Y%m%d).tar.gz"
-          
-          sudo tar --numeric-owner --xattrs --acls -czf "${OUTPUT_FILE}" -C "${ROOTFS_DIR}" .
-          sha256sum "${OUTPUT_FILE}" > "${OUTPUT_FILE}.sha256"
+          tar -czf "archlinux-arm64-rootfs.tar.gz" -C "${ROOTFS_DIR}" .
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v3
         with:
-          name: archlinux-${{ matrix.arch }}-rootfs
+          name: ${{ matrix.arch }}-rootfs
           path: |
-            archlinux-${{ matrix.arch }}-rootfs-*.tar.gz
-            archlinux-${{ matrix.arch }}-rootfs-*.sha256
+            *-rootfs.tar.gz
 
-      - name: Create GitHub release
+      - name: Create release
         if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: arm-rootfs-${{ github.run_id }}
+          tag_name: qemu-arm-rootfs-${{ github.run_id }}
           files: |
-            archlinux-armv7l-rootfs-*.tar.gz
-            archlinux-armv7l-rootfs-*.sha256
-            archlinux-aarch64-rootfs-*.tar.gz
-            archlinux-aarch64-rootfs-*.sha256
+            *-rootfs.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
