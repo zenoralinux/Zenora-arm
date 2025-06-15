@@ -1,45 +1,95 @@
-name: Build ARM RootFS with Docker
+name: Build ARM RootFS
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 0 * * 0'
+    - cron: '0 0 * * 0'  # اجرای هفتگی
 
 jobs:
   build-rootfs:
     strategy:
       matrix:
-        arch: [arm32v7, arm64v8]
+        arch: [armv7l, aarch64]
     runs-on: ubuntu-latest
-    name: "Build ${{ matrix.arch }} rootfs with Docker"
+    name: "Build ${{ matrix.arch }} rootfs"
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build minimal rootfs
-        uses: docker/build-push-action@v5
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
         with:
-          context: .
-          platforms: linux/${{ matrix.arch }}
-          outputs: type=local,dest=./rootfs
-          tags: rootfs-builder
-          build-args: |
-            ARCH=${{ matrix.arch }}
+          platforms: arm
 
-      - name: Package rootfs
+      - name: Prepare environment
         run: |
-          cd rootfs
-          tar -czf "../${{ matrix.arch }}-rootfs.tar.gz" .
-          sha256sum "../${{ matrix.arch }}-rootfs.tar.gz" > "../${{ matrix.arch }}-rootfs.sha256"
+          sudo apt-get update
+          sudo apt-get install -y \
+            qemu-user-static \
+            binfmt-support \
+            debootstrap \
+            arch-install-scripts \
+            wget \
+            curl \
+            tar \
+            gzip \
+            xz-utils
+
+      - name: Build rootfs
+        run: |
+          ROOTFS_DIR="${{ matrix.arch }}-rootfs"
+          mkdir -p "${ROOTFS_DIR}"
+          
+          case "${{ matrix.arch }}" in
+            armv7l)
+              sudo qemu-debootstrap \
+                --arch=armhf \
+                --variant=minbase \
+                bullseye \
+                "${ROOTFS_DIR}" \
+                http://deb.debian.org/debian
+              ;;
+            aarch64)
+              sudo qemu-debootstrap \
+                --arch=arm64 \
+                --variant=minbase \
+                bullseye \
+                "${ROOTFS_DIR}" \
+                http://deb.debian.org/debian
+              ;;
+          esac
+
+          # Basic setup
+          sudo chroot "${ROOTFS_DIR}" /bin/bash -c "
+            apt-get update
+            apt-get install -y sudo curl wget
+            useradd -m -s /bin/bash user
+            echo 'user:user' | chpasswd
+            echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+            apt-get clean
+            rm -rf /var/lib/apt/lists/*
+          "
+          
+          # Create tarball
+          tar --numeric-owner --xattrs --acls -czf "${{ matrix.arch }}-rootfs-$(date +%Y%m%d).tar.gz" -C "${ROOTFS_DIR}" .
+          sha256sum "${{ matrix.arch }}-rootfs-$(date +%Y%m%d).tar.gz" > "${{ matrix.arch }}-rootfs-$(date +%Y%m%d).sha256"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.arch }}-rootfs
           path: |
-            ${{ matrix.arch }}-rootfs.tar.gz
-            ${{ matrix.arch }}-rootfs.sha256
+            ${{ matrix.arch }}-rootfs-*.tar.gz
+            ${{ matrix.arch }}-rootfs-*.sha256
+
+      - name: Create release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: arm-rootfs-${{ github.run_id }}
+          files: |
+            *-rootfs-*.tar.gz
+            *-rootfs-*.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
