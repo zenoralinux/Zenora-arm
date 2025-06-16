@@ -20,11 +20,13 @@ jobs:
       - name: Prepare container environment
         run: |
           pacman-key --init
-          pacman-key --populate
-          # اضافه کردن مخازن ARM64
-          echo -e "\n[archlinuxarm]\nSigLevel = Never\nServer = http://mirror.archlinuxarm.org/\$arch/\$repo" >> /etc/pacman.conf
-          echo -e "\n[alarm]\nSigLevel = Never\nServer = http://mirror.archlinuxarm.org/\$arch/\$repo" >> /etc/pacman.conf
-          pacman -Sy --noconfirm archlinux-keyring
+          pacman-key --populate archlinuxarm
+          # Correct ArchLinuxARM repositories
+          echo -e "\n[archlinuxarm]\nSigLevel = Optional TrustAll\nServer = http://mirror.archlinuxarm.org/\$arch/\$repo" >> /etc/pacman.conf
+          echo -e "\n[alarm]\nSigLevel = Optional TrustAll\nServer = http://mirror.archlinuxarm.org/\$arch/\$repo" >> /etc/pacman.conf
+          
+          # Install required packages
+          pacman -Sy --noconfirm archlinuxarm-keyring
           pacman -Syu --noconfirm
           pacman -S --noconfirm arch-install-scripts wget curl base-devel zip unzip zsh shadow qemu qemu-user-static binfmt-support
 
@@ -33,84 +35,61 @@ jobs:
           echo "IMAGE_VERSION=$(date +%Y%m%d-%H%M)" >> $GITHUB_ENV
           mkdir /mnt/sys-root-skeleton /mnt/sys-root
           mount --bind /mnt/sys-root-skeleton /mnt/sys-root
-          # استفاده از تنظیمات پکمن مخصوص ARM64
+          # Use ArchLinuxARM's pacman.conf
           wget -O target-pacman.conf https://raw.githubusercontent.com/archlinuxarm/PKGBUILDs/master/pacman.conf
+          # Add ARM64 architecture
+          sed -i 's/^#Architecture = auto/Architecture = aarch64/' target-pacman.conf
 
       - name: Initialize rootfs base system for ARM64
         run: |
-          # فعال سازی پشتیبانی از باینری‌های ARM
+          # Register ARM binaries to run via qemu
           update-binfmts --enable qemu-aarch64
-          # ساخت سیستم پایه برای ARM64 با استفاده از مخازن ArchLinuxARM
+          # Create base system for aarch64 using ArchLinuxARM packages
           pacstrap -C target-pacman.conf -K /mnt/sys-root --arch aarch64 \
-            base base-devel curl wget vim nano sudo \
-            texinfo man-db man-pages zsh shadow \
-            archlinuxarm-keyring
+            base base-devel archlinuxarm-keyring \
+            curl wget vim nano sudo \
+            texinfo man-db man-pages zsh shadow
 
       - name: Configure rootfs
         run: |
-          # تنظیمات مخصوص ARM64
+          # Configure ARM64 specific settings
           echo "Architecture = aarch64" >> /mnt/sys-root/etc/pacman.conf
-          # استفاده از میرورهای ArchLinuxARM
+          # Use ArchLinuxARM mirrors
           echo "Server = http://mirror.archlinuxarm.org/\$arch/\$repo" > /mnt/sys-root/etc/pacman.d/mirrorlist
           
-          # مخازن اضافی برای ARM64
-          echo -e "\n[archlinuxcn-arm]\nSigLevel = Never\nServer = https://repo.archlinuxcn.org/\$arch" >> /mnt/sys-root/etc/pacman.conf
-          echo -e "\n[blackarch-arm]\nSigLevel = Never\nServer = https://blackarch.org/blackarch/\$repo/os/\$arch" >> /mnt/sys-root/etc/pacman.conf
-          
-          # تنظیمات پایه
+          # Basic configurations
           echo "%wheel ALL=(ALL:ALL) ALL" > /mnt/sys-root/etc/sudoers.d/wheel
           echo "tmpfs /tmp tmpfs mode=1777,strictatime,nosuid,nodev,size=50%,nr_inodes=1m 0 0" >> /mnt/sys-root/etc/fstab
-          echo "PACMAN_IGNORE_LANDLOCK=1" >> /mnt/sys-root/etc/environment
-
-          # تنظیمات محلی
+          echo "LANG=en_US.UTF-8" > /mnt/sys-root/etc/locale.conf
           echo "en_US.UTF-8 UTF-8" >> /mnt/sys-root/etc/locale.gen
-          chroot /mnt/sys-root /usr/bin/locale-gen
-          chroot /mnt/sys-root /usr/bin/systemctl mask systemd-binfmt.service systemd-resolved.service systemd-networkd.service tmp.mount
           
-          # پاکسازی
-          rm -rf /mnt/sys-root/etc/pacman.d/gnupg /mnt/sys-root/var/lib/pacman/sync/
+          # Initialize keyring in the target
+          cp -r /etc/pacman.d/gnupg /mnt/sys-root/etc/pacman.d/
+          chroot /mnt/sys-root pacman-key --init
+          chroot /mnt/sys-root pacman-key --populate archlinuxarm
+          
+          # Cleanup
           rm -f /mnt/sys-root/etc/machine-id
           touch /mnt/sys-root/etc/machine-id
           rm -rf /mnt/sys-root/var/cache/pacman/pkg/*
 
       - name: Create default user and configure zsh
         run: |
-          chroot /mnt/sys-root /usr/bin/useradd -m -G wheel -s /bin/zsh zenora
-          echo 'zenora:zenora' | chroot /mnt/sys-root /usr/bin/chpasswd
-
-          # تنظیم zsh به عنوان پیش‌فرض
+          chroot /mnt/sys-root useradd -m -G wheel -s /bin/zsh zenora
+          echo 'zenora:zenora' | chroot /mnt/sys-root chpasswd
           echo "/bin/zsh" >> /mnt/sys-root/etc/shells
           echo "SHELL=/bin/zsh" >> /mnt/sys-root/etc/environment
-          sed -i 's|^SHELL=.*|SHELL=/bin/zsh|' /mnt/sys-root/etc/default/useradd
-          sed -i 's|^root:.*:bash|root:*:*:/bin/zsh|' /mnt/sys-root/etc/passwd
-          
-          # ایجاد فایل‌های پیکربندی zsh
-          cp /mnt/sys-root/etc/skel/.bashrc /mnt/sys-root/etc/skel/.zshrc 2>/dev/null || true
-          touch /mnt/sys-root/etc/skel/.zshrc
-          touch /mnt/sys-root/home/zenora/.zshrc
-          chown 1000:1000 /mnt/sys-root/home/zenora/.zshrc
 
-      - name: Install Zenora packages for ARM64
+      - name: Install additional packages
         run: |
-          # نصب پکیج‌های Zenora با نسخه‌های ARM64
-          chroot /mnt/sys-root /usr/bin/pacman -Sy --noconfirm
-          chroot /mnt/sys-root /usr/bin/pacman -S --noconfirm \
-            zenora-release-arm \
-            zenora-fake-apt-arm \
-            zenora-back-arm \
-            zenora-termux-zsh-config \
-            zenora-conf-update-arm \
+          chroot /mnt/sys-root pacman -Sy --noconfirm
+          chroot /mnt/sys-root pacman -S --noconfirm \
             neofetch \
-            zsh \
-            glibc
+            git \
+            openssh
 
       - name: Cleanup and package rootfs
         run: |
-          # حذف فایل‌های غیرضروری برای ترمکس
-          rm -rf /mnt/sys-root/usr/lib/systemd/
-          rm -rf /mnt/sys-root/var/cache/pacman/pkg/*
-          
-          # ایجاد rootfs فشرده
           tar --numeric-owner -czf zenora-arm64-rootfs.tar.gz -C /mnt/sys-root ./
 
       - name: Generate sha256sums
