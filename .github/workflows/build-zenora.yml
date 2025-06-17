@@ -1,74 +1,58 @@
-name: Build ARM64 rootfs
+name: Build ARM64 Rootfs (QEMU Emulation)
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '24 7 1 * *'
+    - cron: '0 0 * * *'  # روزانه اجرا شود
 
 jobs:
-  build-rootfs:
+  build-arm64-rootfs:
     runs-on: ubuntu-latest
-    name: "Build ARM64 rootfs"
-    container: 
-      image: archlinux/archlinux
-      options: --privileged
+    container:
+      image: archlinux/archlinux:latest
+      options: --device /dev/kvm --security-opt seccomp=unconfined  # نیازمندی‌های QEMU
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup QEMU and dependencies
+        run: |
+          pacman -Sy --noconfirm qemu-full qemu-user-static binfmt-support arch-install-scripts
+
+          # فعال‌سازی پشتیبانی از ARM64
+          docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+
       - name: Prepare ARM64 environment
         run: |
-          pacman-key --init
-          pacman-key --populate archlinuxarm
-          pacman -Sy --noconfirm archlinux-keyring qemu qemu-arch-extra
-          # Enable binfmt support for ARM64
-          docker run --privileged --rm tonistiigi/binfmt --install arm64
-          pacman -Syu --noconfirm arch-install-scripts wget curl base-devel
+          mkdir -p /arm64-rootfs
+          wget -O /tmp/pacman-arm64.conf https://raw.githubusercontent.com/archlinuxarm/PKGBUILDs/master/etc/pacman.conf
+          sed -i 's/#Architecture = auto/Architecture = aarch64/' /tmp/pacman-arm64.conf
+          echo -e "\n[alarm]\nSigLevel = Never\nServer = http://mirror.archlinuxarm.org/\$arch/\$repo" >> /tmp/pacman-arm64.conf
 
-      - name: Set image version and prepare rootfs
+      - name: Install base system
         run: |
-          echo "IMAGE_VERSION=$(date +%Y%m%d-%H%M)" >> $GITHUB_ENV
-          mkdir /mnt/sys-root
-          # Download ARM64-specific pacman.conf
-          wget -O /target-pacman.conf https://raw.githubusercontent.com/archlinuxarm/PKGBUILDs/master/etc/pacman.conf
-          sed -i 's|#Architecture.*|Architecture = aarch64|' /target-pacman.conf
+          pacstrap -C /tmp/pacman-arm64.conf -K /arm64-rootfs base base-devel
+          cp /usr/bin/qemu-aarch64-static /arm64-rootfs/usr/bin/
 
-      - name: Initialize ARM64 rootfs
+      - name: Basic system configuration
         run: |
-          # Use Arch Linux ARM repositories
-          echo -e "\n[alarm]\nSigLevel = Never\nServer = http://mirror.archlinuxarm.org/\$arch/\$repo" >> /target-pacman.conf
-          # Install base system for ARM64
-          pacstrap -C /target-pacman.conf -K /mnt/sys-root base base-devel --arch=aarch64
-          cp /usr/bin/qemu-aarch64-static /mnt/sys-root/usr/bin/
-
-      - name: Configure rootfs
-        run: |
-          arch-chroot /mnt/sys-root /bin/bash <<EOF
-          sed -i 's/^#Server/Server/' /etc/pacman.d/mirrorlist
+          arch-chroot /arm64-rootfs /bin/bash <<EOF
           echo "LANG=en_US.UTF-8" > /etc/locale.conf
           echo "en_US.UTF-8 UTF-8" >> /etc/locale.gen
           locale-gen
+          ln -sf /usr/share/zoneinfo/UTC /etc/localtime
           EOF
 
-      - name: Install Zenora packages (ARM64)
+      - name: Create and upload artifact
         run: |
-          arch-chroot /mnt/sys-root /bin/bash <<EOF
-          pacman -Sy --noconfirm \
-            zsh \
-            neofetch \
-            sudo \
-            curl \
-            wget
-          EOF
+          tar --numeric-owner -czf arm64-rootfs-$(date +%Y%m%d).tar.gz -C /arm64-rootfs .
+          sha256sum arm64-rootfs-*.tar.gz > checksum.txt
 
-      - name: Package rootfs
-        run: |
-          tar --numeric-owner -czf zenora-arm64-rootfs.tar.gz -C /mnt/sys-root .
-
-      - name: Upload artifact
-        uses: softprops/action-gh-release@v0.1.15
+      - name: Upload rootfs
+        uses: actions/upload-artifact@v3
         with:
-          files: zenora-arm64-rootfs.tar.gz
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: arm64-rootfs
+          path: |
+            arm64-rootfs-*.tar.gz
+            checksum.txt
