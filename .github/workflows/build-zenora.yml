@@ -3,56 +3,76 @@ name: Build ARM64 Rootfs (QEMU Emulation)
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 0 * * *'  # روزانه اجرا شود
+    - cron: '0 0 * * *'
 
 jobs:
   build-arm64-rootfs:
     runs-on: ubuntu-latest
     container:
       image: archlinux/archlinux:latest
-      options: --device /dev/kvm --security-opt seccomp=unconfined  # نیازمندی‌های QEMU
+      options: --device /dev/kvm --security-opt seccomp=unconfined
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup QEMU and dependencies
+      - name: Setup QEMU environment
         run: |
-          pacman -Sy --noconfirm qemu-full qemu-user-static binfmt-support arch-install-scripts
-
+          # نصب پیش‌نیازها با توجه به معماری میزبان (x86_64)
+          pacman -Sy --noconfirm qemu-full qemu-user-static binfmt-support arch-install-scripts git wget
+          
           # فعال‌سازی پشتیبانی از ARM64
           docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+          systemctl restart systemd-binfmt.service
 
-      - name: Prepare ARM64 environment
+      - name: Prepare rootfs structure
         run: |
           mkdir -p /arm64-rootfs
           wget -O /tmp/pacman-arm64.conf https://raw.githubusercontent.com/archlinuxarm/PKGBUILDs/master/etc/pacman.conf
-          sed -i 's/#Architecture = auto/Architecture = aarch64/' /tmp/pacman-arm64.conf
+          sed -i \
+            -e 's/#Architecture = auto/Architecture = aarch64/' \
+            -e 's|#Include = /etc/pacman.d/mirrorlist|Include = /etc/pacman.d/mirrorlist|' \
+            /tmp/pacman-arm64.conf
+          
+          # افزودن ریپازیتوری Arch Linux ARM
           echo -e "\n[alarm]\nSigLevel = Never\nServer = http://mirror.archlinuxarm.org/\$arch/\$repo" >> /tmp/pacman-arm64.conf
 
       - name: Install base system
         run: |
-          pacstrap -C /tmp/pacman-arm64.conf -K /arm64-rootfs base base-devel
+          # نصب سیستم پایه با استفاده از شبیه‌ساز ARM64
+          pacstrap -C /tmp/pacman-arm64.conf -K /arm64-rootfs \
+            base \
+            base-devel \
+            sudo \
+            curl \
+            wget \
+            vim
+            
+          # کپی QEMU برای اجرای chroot
           cp /usr/bin/qemu-aarch64-static /arm64-rootfs/usr/bin/
 
-      - name: Basic system configuration
+      - name: Configure system
         run: |
-          arch-chroot /arm64-rootfs /bin/bash <<EOF
+          # تنظیمات اولیه سیستم
+          arch-chroot /arm64-rootfs /bin/bash <<'EOF'
           echo "LANG=en_US.UTF-8" > /etc/locale.conf
           echo "en_US.UTF-8 UTF-8" >> /etc/locale.gen
           locale-gen
           ln -sf /usr/share/zoneinfo/UTC /etc/localtime
+          echo "root:password" | chpasswd
           EOF
 
-      - name: Create and upload artifact
+      - name: Create artifact
         run: |
+          # فشرده‌سازی با حفظ مالکیت فایل‌ها
           tar --numeric-owner -czf arm64-rootfs-$(date +%Y%m%d).tar.gz -C /arm64-rootfs .
           sha256sum arm64-rootfs-*.tar.gz > checksum.txt
 
-      - name: Upload rootfs
-        uses: actions/upload-artifact@v3
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
           name: arm64-rootfs
           path: |
             arm64-rootfs-*.tar.gz
             checksum.txt
+          retention-days: 7
