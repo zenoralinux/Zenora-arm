@@ -20,9 +20,10 @@ jobs:
       - name: Prepare ARM64 environment
         run: |
           pacman-key --init
-          pacman-key --populate
-          pacman -Sy --noconfirm archlinux-keyring qemu qemu-arch-extra binfmt-support
-          systemctl restart systemd-binfmt.service
+          pacman-key --populate archlinuxarm
+          pacman -Sy --noconfirm archlinux-keyring qemu qemu-arch-extra
+          # Enable binfmt support for ARM64
+          docker run --privileged --rm tonistiigi/binfmt --install arm64
           pacman -Syu --noconfirm arch-install-scripts wget curl base-devel
 
       - name: Set image version and prepare rootfs
