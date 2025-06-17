@@ -1,4 +1,4 @@
-name: Build rootfs
+name: Build ARM64 rootfs
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ on:
 jobs:
   build-rootfs:
     runs-on: ubuntu-latest
-    name: "Build rootfs"
+    name: "Build ARM64 rootfs"
     container: 
       image: archlinux/archlinux
       options: --privileged
@@ -17,112 +17,57 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Prepare container environment
+      - name: Prepare ARM64 environment
         run: |
           pacman-key --init
           pacman-key --populate
-          echo -e "\n[zrepo]\nSigLevel = Never\nServer = https://codeberg.org/zenoralinux/zenora-repo/media/branch/main/\$arch" >> /etc/pacman.conf
-          pacman -Sy --noconfirm archlinux-keyring
-          pacman -Syu --noconfirm
-          pacman -S --noconfirm arch-install-scripts wget curl base-devel zip unzip zsh shadow
+          pacman -Sy --noconfirm archlinux-keyring qemu qemu-arch-extra binfmt-support
+          systemctl restart systemd-binfmt.service
+          pacman -Syu --noconfirm arch-install-scripts wget curl base-devel
 
       - name: Set image version and prepare rootfs
         run: |
           echo "IMAGE_VERSION=$(date +%Y%m%d-%H%M)" >> $GITHUB_ENV
-          mkdir /mnt/sys-root-skeleton /mnt/sys-root
-          mount --bind /mnt/sys-root-skeleton /mnt/sys-root
-          wget -O target-pacman.conf https://raw.githubusercontent.com/zenoralinux/wsl-zenora-rootfs/refs/heads/main/pacman.conf
+          mkdir /mnt/sys-root
+          # Download ARM64-specific pacman.conf
+          wget -O /target-pacman.conf https://raw.githubusercontent.com/archlinuxarm/PKGBUILDs/master/etc/pacman.conf
+          sed -i 's|#Architecture.*|Architecture = aarch64|' /target-pacman.conf
 
-      - name: Initialize rootfs base system
+      - name: Initialize ARM64 rootfs
         run: |
-          pacstrap -G -M -C target-pacman.conf -K /mnt/sys-root base curl wget vim nano sudo texinfo man-db man-pages zsh shadow
+          # Use Arch Linux ARM repositories
+          echo -e "\n[alarm]\nSigLevel = Never\nServer = http://mirror.archlinuxarm.org/\$arch/\$repo" >> /target-pacman.conf
+          # Install base system for ARM64
+          pacstrap -C /target-pacman.conf -K /mnt/sys-root base base-devel --arch=aarch64
+          cp /usr/bin/qemu-aarch64-static /mnt/sys-root/usr/bin/
 
       - name: Configure rootfs
         run: |
-          sed -i 's/^#Server/Server/' /mnt/sys-root/etc/pacman.d/mirrorlist
-          sed -i 's/^#Color/Color/; s/^#ParallelDownloads/ParallelDownloads/' /mnt/sys-root/etc/pacman.conf
-          echo -e "\n[archlinuxcn]\nSigLevel = Never\nServer = https://repo.archlinuxcn.org/\$arch" >> /mnt/sys-root/etc/pacman.conf
-          echo -e "\n[blackarch]\nSigLevel = Never\nServer = https://blackarch.org/blackarch/\$repo/os/\$arch" >> /mnt/sys-root/etc/pacman.conf
+          arch-chroot /mnt/sys-root /bin/bash <<EOF
+          sed -i 's/^#Server/Server/' /etc/pacman.d/mirrorlist
+          echo "LANG=en_US.UTF-8" > /etc/locale.conf
+          echo "en_US.UTF-8 UTF-8" >> /etc/locale.gen
+          locale-gen
+          EOF
 
-          # Move zrepo to the top
-          awk '/^\[zrepo\]/,/^$/' /mnt/sys-root/etc/pacman.conf > zrepo.conf
-          grep -v "^\[zrepo\]" /mnt/sys-root/etc/pacman.conf | grep -v "https://codeberg.org/zenoralinux" > temp.conf
-          cat zrepo.conf temp.conf > /mnt/sys-root/etc/pacman.conf
-          rm zrepo.conf temp.conf
-
-          echo "%wheel ALL=(ALL:ALL) ALL" > /mnt/sys-root/etc/sudoers.d/wheel
-          echo "tmpfs /tmp tmpfs mode=1777,strictatime,nosuid,nodev,size=50%,nr_inodes=1m 0 0" >> /mnt/sys-root/etc/fstab
-          echo "PACMAN_IGNORE_LANDLOCK=1" >> /mnt/sys-root/etc/environment
-
-          arch-chroot /mnt/sys-root locale-gen
-          arch-chroot /mnt/sys-root systemctl mask systemd-binfmt.service systemd-resolved.service systemd-networkd.service tmp.mount
-          rm -rf /mnt/sys-root/etc/pacman.d/gnupg /mnt/sys-root/var/lib/pacman/sync/
-          rm -f /mnt/sys-root/etc/machine-id
-          touch /mnt/sys-root/etc/machine-id
-          rm -rf /mnt/sys-root/var/cache/pacman/pkg/*
-
-      - name: Create default user and configure zsh
+      - name: Install Zenora packages (ARM64)
         run: |
-          arch-chroot /mnt/sys-root useradd -m -G wheel -s /bin/zsh zenora
-          echo 'zenora:zenora' | arch-chroot /mnt/sys-root chpasswd
-
-          # set zsh globally
-          echo "/bin/zsh" >> /mnt/sys-root/etc/shells
-          echo "SHELL=/bin/zsh" >> /mnt/sys-root/etc/environment
-          sed -i 's|^SHELL=.*|SHELL=/bin/zsh|' /mnt/sys-root/etc/default/useradd
-
-          # make zsh default for root
-          sed -i 's|^root:.*:bash|root:*:*:/bin/zsh|' /mnt/sys-root/etc/passwd
-          cp /mnt/sys-root/etc/skel/.bashrc /mnt/sys-root/etc/skel/.zshrc 2>/dev/null || true
-          touch /mnt/sys-root/etc/skel/.zshrc
-          touch /mnt/sys-root/home/zenora/.zshrc
-          chown $zenora:$zenora /mnt/sys-root/home/zenora/.zshrc
-      - name: Install Zenora packages
-        run: |
-          cp /etc/pacman.conf /mnt/sys-root/etc/pacman.conf
-          cp -r /etc/pacman.d /mnt/sys-root/etc/
-          arch-chroot /mnt/sys-root pacman -Sy --noconfirm
-          arch-chroot /mnt/sys-root pacman -S --noconfirm \
-            zenora-release \
-            zenora-fake-apt \
-            zenora-back \
-            zenora-wsl-zsh-config \
-            zenora-conf-update \
-            neofetch \
+          arch-chroot /mnt/sys-root /bin/bash <<EOF
+          pacman -Sy --noconfirm \
             zsh \
-            glibc
-            
-      - name: Configure WSL integration
-        run: |
-          mkdir -p /mnt/sys-root/usr/lib/wsl
-          cp zenora.ico /mnt/sys-root/usr/lib/wsl/zenora.ico
-          cp wsl-oobe.sh /mnt/sys-root/usr/lib/wsl/oobe.sh
-          chmod +x /mnt/sys-root/usr/lib/wsl/oobe.sh
-          cp wsl.conf /mnt/sys-root/etc/wsl.conf
-          cp wsl-distribution.conf /mnt/sys-root/etc/wsl-distribution.conf
-          sed -i 's/^NoProgressBar/#NoProgressBar/' /mnt/sys-root/etc/pacman.conf
-          bash -c "sed -i '/^#en_US.UTF-8 UTF-8/s/^#//' /etc/locale.gen && locale-gen && echo 'LANG=en_US.UTF-8' > /etc/locale.conf"
+            neofetch \
+            sudo \
+            curl \
+            wget
+          EOF
 
-
-      - name: Cleanup and package rootfs
+      - name: Package rootfs
         run: |
-          rm -f /mnt/sys-root/usr/lib/wsl/libnvoptix_loader.so.1
-          tar --numeric-owner -czf zenora.wsl -C /mnt/sys-root ./
-      - name: Create tar.gz rootfs
-        run: |
-         tar --numeric-owner -czf zenora-wsl-rootfs.tar.gz -C /mnt/sys-root ./
-      - name: Generate sha256sums
-        run: |
-          sha256sum zenora.wsl zenora-wsl-rootfs.tar.gz > sha256sums
+          tar --numeric-owner -czf zenora-arm64-rootfs.tar.gz -C /mnt/sys-root .
 
       - name: Upload artifact
         uses: softprops/action-gh-release@v0.1.15
         with:
-          tag_name: "${{ env.IMAGE_VERSION }}"
-          files: |
-            zenora.wsl
-            sha256sums
-            zenora-wsl-rootfs.tar.gz
-            
+          files: zenora-arm64-rootfs.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
