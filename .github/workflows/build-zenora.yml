@@ -33,26 +33,35 @@ jobs:
           # Register ARM64 emulation
           if [ -f /proc/sys/fs/binfmt_misc/register ]; then
             echo ':aarch64:M::\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\xb7\x00:\xff\xff\xff\xff\xff\xff\xff\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff:/usr/bin/qemu-aarch64-static:F' > /proc/sys/fs/binfmt_misc/register
-          else
-            echo "Warning: binfmt_misc not available, using direct qemu execution"
           fi
 
       - name: Prepare rootfs structure
         run: |
           mkdir -p /arm64-rootfs
-          wget -O /tmp/pacman-arm64.conf https://raw.githubusercontent.com/archlinuxarm/PKGBUILDs/master/etc/pacman.conf
           
-          sed -i \
-            -e 's/#Architecture = auto/Architecture = aarch64/' \
-            -e 's|#Include = /etc/pacman.d/mirrorlist|Include = /etc/pacman.d/mirrorlist|' \
-            -e 's/^#ParallelDownloads/ParallelDownloads/' \
-            /tmp/pacman-arm64.conf
+          # Create minimal pacman.conf for ARM64
+          cat > /tmp/pacman-arm64.conf <<EOF
+          [options]
+          Architecture = aarch64
+          ParallelDownloads = 5
+          Color
           
-          echo -e "\n[alarm]\nSigLevel = Never\nServer = http://mirror.archlinuxarm.org/\$arch/\$repo" >> /tmp/pacman-arm64.conf
+          [core]
+          Include = /etc/pacman.d/mirrorlist
+          
+          [extra]
+          Include = /etc/pacman.d/mirrorlist
+          
+          [community]
+          Include = /etc/pacman.d/mirrorlist
+          
+          [alarm]
+          Server = http://mirror.archlinuxarm.org/\$arch/\$repo
+          EOF
 
       - name: Install base system
         run: |
-          # Install base system
+          # Install base system with ARM64 emulation
           pacstrap -C /tmp/pacman-arm64.conf -G -M -K /arm64-rootfs \
             base \
             base-devel \
@@ -88,9 +97,8 @@ jobs:
           # Network
           echo "127.0.1.1 alarm.localdomain alarm" >> /arm64-rootfs/etc/hosts
           
-          # Pacman config
-          sed -i 's/^#Color/Color/' /arm64-rootfs/etc/pacman.conf
-          sed -i 's/^#ParallelDownloads/ParallelDownloads/' /arm64-rootfs/etc/pacman.conf
+          # Update mirrorlist for ARM64
+          echo "Server = http://mirror.archlinuxarm.org/\$arch/\$repo" > /arm64-rootfs/etc/pacman.d/mirrorlist
 
       - name: Cleanup system
         run: |
