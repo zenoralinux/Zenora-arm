@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: archlinux/archlinux:latest
-      options: --device /dev/kvm --security-opt seccomp=unconfined
+      options: --privileged
 
     steps:
       - name: Checkout repository
@@ -19,22 +19,19 @@ jobs:
       - name: Setup QEMU environment
         run: |
           # Initialize pacman and install dependencies
-          pacman-key --init
-          pacman-key --populate
           pacman -Sy --noconfirm --needed \
             qemu-full \
             qemu-user-static \
-            qemu-user-static-binfmt \
             arch-install-scripts \
             git \
             wget \
-            curl \
-            docker
+            curl
 
-          # Enable ARM64 emulation
-          docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
-          systemctl restart systemd-binfmt.service
-          
+          # Manual binfmt setup for ARM64 (avoids systemd dependency)
+          mkdir -p /proc/sys/fs/binfmt_misc
+          echo ':aarch64:M::\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\xb7\x00:\xff\xff\xff\xff\xff\xff\xff\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff:/usr/bin/qemu-aarch64-static:F' > /proc/sys/fs/binfmt_misc/register
+          echo 1 > /proc/sys/fs/binfmt_misc/status
+
       - name: Prepare rootfs structure
         run: |
           mkdir -p /arm64-rootfs
@@ -49,7 +46,6 @@ jobs:
           
           # Add Arch Linux ARM repositories
           echo -e "\n[alarm]\nSigLevel = Never\nServer = http://mirror.archlinuxarm.org/\$arch/\$repo" >> /tmp/pacman-arm64.conf
-          echo -e "\n[archlinuxarm]\nSigLevel = Never\nServer = http://mirror.archlinuxarm.org/\$arch/\$repo" >> /tmp/pacman-arm64.conf
 
       - name: Install base system
         run: |
@@ -66,48 +62,43 @@ jobs:
             git \
             man-db \
             man-pages \
-            texinfo \
-            --arch aarch64
+            texinfo
           
           # Copy QEMU static binary for chroot
           cp /usr/bin/qemu-aarch64-static /arm64-rootfs/usr/bin/
 
       - name: Configure system
         run: |
-          # Basic system configuration
-          arch-chroot /arm64-rootfs /bin/bash <<'EOF'
-          # Locale and time
-          echo "LANG=en_US.UTF-8" > /etc/locale.conf
-          echo "en_US.UTF-8 UTF-8" >> /etc/locale.gen
-          locale-gen
-          ln -sf /usr/share/zoneinfo/UTC /etc/localtime
+          # Basic system configuration (avoiding systemd commands)
+          cat <<EOF > /arm64-rootfs/etc/locale.conf
+          LANG=en_US.UTF-8
+          EOF
+          
+          echo "en_US.UTF-8 UTF-8" >> /arm64-rootfs/etc/locale.gen
+          chroot /arm64-rootfs /usr/bin/locale-gen
+          
+          ln -sf /usr/share/zoneinfo/UTC /arm64-rootfs/etc/localtime
           
           # User management
-          echo "root:password" | chpasswd
-          useradd -m -G wheel -s /bin/zsh alarm
-          echo "alarm:alarm" | chpasswd
-          echo "%wheel ALL=(ALL) ALL" >> /etc/sudoers
+          echo 'root:password' | chroot /arm64-rootfs /usr/bin/chpasswd
+          chroot /arm64-rootfs /usr/bin/useradd -m -G wheel -s /bin/zsh alarm
+          echo 'alarm:alarm' | chroot /arm64-rootfs /usr/bin/chpasswd
+          echo '%wheel ALL=(ALL) ALL' > /arm64-rootfs/etc/sudoers.d/wheel
           
           # Network
-          echo "127.0.1.1 alarm.localdomain alarm" >> /etc/hosts
-          systemctl enable systemd-networkd.service
-          systemctl enable systemd-resolved.service
+          echo "127.0.1.1 alarm.localdomain alarm" >> /arm64-rootfs/etc/hosts
           
           # Pacman configuration
-          sed -i 's/^#Color/Color/' /etc/pacman.conf
-          sed -i 's/^#ParallelDownloads/ParallelDownloads/' /etc/pacman.conf
-          EOF
+          sed -i 's/^#Color/Color/' /arm64-rootfs/etc/pacman.conf
+          sed -i 's/^#ParallelDownloads/ParallelDownloads/' /arm64-rootfs/etc/pacman.conf
 
       - name: Cleanup system
         run: |
           # Clean up to reduce image size
-          arch-chroot /arm64-rootfs /bin/bash <<'EOF'
-          pacman -Scc --noconfirm
-          rm -rf /var/cache/pacman/pkg/*
-          rm -rf /var/lib/pacman/sync/*
-          rm -f /etc/machine-id
-          touch /etc/machine-id
-          EOF
+          rm -f /arm64-rootfs/etc/machine-id
+          touch /arm64-rootfs/etc/machine-id
+          rm -rf /arm64-rootfs/var/cache/pacman/pkg/*
+          rm -rf /arm64-rootfs/var/lib/pacman/sync/*
 
       - name: Create artifact
         run: |
