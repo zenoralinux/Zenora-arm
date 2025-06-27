@@ -19,7 +19,7 @@ jobs:
       - name: Setup QEMU environment
         run: |
           # نصب پیش‌نیازها با توجه به معماری میزبان (x86_64)
-          pacman -Sy --noconfirm qemu-full qemu-user-static binfmt-support arch-install-scripts git wget
+          pacman -Sy --noconfirm qemu-full qemu-user-static qemu-user-static-binfmt arch-install-scripts git wget
           
           # فعال‌سازی پشتیبانی از ARM64
           docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
