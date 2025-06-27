@@ -27,29 +27,32 @@ jobs:
             wget \
             curl
 
-          # Manual binfmt setup for ARM64 (avoids systemd dependency)
-          mkdir -p /proc/sys/fs/binfmt_misc
-          echo ':aarch64:M::\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\xb7\x00:\xff\xff\xff\xff\xff\xff\xff\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff:/usr/bin/qemu-aarch64-static:F' > /proc/sys/fs/binfmt_misc/register
-          echo 1 > /proc/sys/fs/binfmt_misc/status
+          # Mount binfmt_misc manually
+          mount binfmt_misc -t binfmt_misc /proc/sys/fs/binfmt_misc || true
+          
+          # Register ARM64 emulation
+          if [ -f /proc/sys/fs/binfmt_misc/register ]; then
+            echo ':aarch64:M::\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\xb7\x00:\xff\xff\xff\xff\xff\xff\xff\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff:/usr/bin/qemu-aarch64-static:F' > /proc/sys/fs/binfmt_misc/register
+          else
+            echo "Warning: binfmt_misc not available, using direct qemu execution"
+          fi
 
       - name: Prepare rootfs structure
         run: |
           mkdir -p /arm64-rootfs
           wget -O /tmp/pacman-arm64.conf https://raw.githubusercontent.com/archlinuxarm/PKGBUILDs/master/etc/pacman.conf
           
-          # Configure pacman for ARM64
           sed -i \
             -e 's/#Architecture = auto/Architecture = aarch64/' \
             -e 's|#Include = /etc/pacman.d/mirrorlist|Include = /etc/pacman.d/mirrorlist|' \
             -e 's/^#ParallelDownloads/ParallelDownloads/' \
             /tmp/pacman-arm64.conf
           
-          # Add Arch Linux ARM repositories
           echo -e "\n[alarm]\nSigLevel = Never\nServer = http://mirror.archlinuxarm.org/\$arch/\$repo" >> /tmp/pacman-arm64.conf
 
       - name: Install base system
         run: |
-          # Install base system with ARM64 emulation
+          # Install base system
           pacstrap -C /tmp/pacman-arm64.conf -G -M -K /arm64-rootfs \
             base \
             base-devel \
@@ -64,22 +67,19 @@ jobs:
             man-pages \
             texinfo
           
-          # Copy QEMU static binary for chroot
+          # Copy QEMU static binary
           cp /usr/bin/qemu-aarch64-static /arm64-rootfs/usr/bin/
 
       - name: Configure system
         run: |
-          # Basic system configuration (avoiding systemd commands)
-          cat <<EOF > /arm64-rootfs/etc/locale.conf
-          LANG=en_US.UTF-8
-          EOF
-          
+          # Basic configuration
+          echo "LANG=en_US.UTF-8" > /arm64-rootfs/etc/locale.conf
           echo "en_US.UTF-8 UTF-8" >> /arm64-rootfs/etc/locale.gen
           chroot /arm64-rootfs /usr/bin/locale-gen
           
           ln -sf /usr/share/zoneinfo/UTC /arm64-rootfs/etc/localtime
           
-          # User management
+          # User setup
           echo 'root:password' | chroot /arm64-rootfs /usr/bin/chpasswd
           chroot /arm64-rootfs /usr/bin/useradd -m -G wheel -s /bin/zsh alarm
           echo 'alarm:alarm' | chroot /arm64-rootfs /usr/bin/chpasswd
@@ -88,13 +88,13 @@ jobs:
           # Network
           echo "127.0.1.1 alarm.localdomain alarm" >> /arm64-rootfs/etc/hosts
           
-          # Pacman configuration
+          # Pacman config
           sed -i 's/^#Color/Color/' /arm64-rootfs/etc/pacman.conf
           sed -i 's/^#ParallelDownloads/ParallelDownloads/' /arm64-rootfs/etc/pacman.conf
 
       - name: Cleanup system
         run: |
-          # Clean up to reduce image size
+          # Reduce image size
           rm -f /arm64-rootfs/etc/machine-id
           touch /arm64-rootfs/etc/machine-id
           rm -rf /arm64-rootfs/var/cache/pacman/pkg/*
@@ -102,7 +102,6 @@ jobs:
 
       - name: Create artifact
         run: |
-          # Create compressed rootfs with proper ownership
           tar --numeric-owner -czf arm64-rootfs-$(date +%Y%m%d).tar.gz -C /arm64-rootfs .
           sha256sum arm64-rootfs-*.tar.gz > checksum.txt
           du -sh arm64-rootfs-*.tar.gz
