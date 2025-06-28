@@ -25,7 +25,8 @@ jobs:
             arch-install-scripts \
             git \
             wget \
-            curl
+            curl \
+            archlinuxarm-keyring
 
           # Mount binfmt_misc manually
           mount binfmt_misc -t binfmt_misc /proc/sys/fs/binfmt_misc || true
@@ -39,17 +40,15 @@ jobs:
         run: |
           mkdir -p /arm64-rootfs
           
-          # Create minimal pacman.conf for ARM64 with only Arch Linux ARM mirrors
+          # Create minimal pacman.conf for ARM64
           cat > /tmp/pacman-arm64.conf <<EOF
           [options]
           Architecture = aarch64
           ParallelDownloads = 5
           Color
+          SigLevel = Never
           
           [alarm]
-          Server = http://mirror.archlinuxarm.org/\$arch/\$repo
-          
-          [aur]
           Server = http://mirror.archlinuxarm.org/\$arch/\$repo
           EOF
 
@@ -59,11 +58,15 @@ jobs:
 
       - name: Install base system
         run: |
-          # First initialize the keyring in the target root
-          mkdir -p /arm64-rootfs/etc/pacman.d/gnupg
-          pacman-key --init --gpgdir /arm64-rootfs/etc/pacman.d/gnupg
-          pacman-key --populate --gpgdir /arm64-rootfs/etc/pacman.d/gnupg archlinuxarm
-
+          # First install archlinuxarm-keyring in target root
+          mkdir -p /arm64-rootfs/usr/share/pacman/keyrings
+          wget -O /arm64-rootfs/usr/share/pacman/keyrings/archlinuxarm.gpg \
+            https://archlinuxarm.org/about/keyring
+          
+          # Initialize keyring in target root
+          chroot /arm64-rootfs pacman-key --init
+          chroot /arm64-rootfs pacman-key --populate archlinuxarm
+          
           # Install base system using only ARM64 packages
           pacstrap -C /tmp/pacman-arm64.conf -G -M -K /arm64-rootfs \
             base \
