@@ -25,11 +25,7 @@ jobs:
             arch-install-scripts \
             git \
             wget \
-            curl \
-            haveged
-
-          # Start entropy generation for GPG
-          systemctl start haveged
+            curl
 
           # Mount binfmt_misc manually
           mount binfmt_misc -t binfmt_misc /proc/sys/fs/binfmt_misc || true
@@ -43,40 +39,28 @@ jobs:
         run: |
           mkdir -p /arm64-rootfs
           
-          # Create minimal pacman.conf for ARM64 with specific mirrors
+          # Create minimal pacman.conf for ARM64
           cat > /tmp/pacman-arm64.conf <<EOF
           [options]
           Architecture = aarch64
           ParallelDownloads = 5
           Color
-          SigLevel = Never
           
           [core]
-          Server = http://mirror.archlinuxarm.org/\$arch/\$repo
+          Include = /etc/pacman.d/mirrorlist
           
           [extra]
-          Server = http://mirror.archlinuxarm.org/\$arch/\$repo
+          Include = /etc/pacman.d/mirrorlist
           
           [community]
-          Server = http://mirror.archlinuxarm.org/\$arch/\$repo
+          Include = /etc/pacman.d/mirrorlist
           
           [alarm]
           Server = http://mirror.archlinuxarm.org/\$arch/\$repo
           EOF
 
-      - name: Initialize keyring
-        run: |
-          # Initialize pacman keyring in target root
-          mkdir -p /arm64-rootfs/etc/pacman.d/gnupg
-          chmod 700 /arm64-rootfs/etc/pacman.d/gnupg
-          pacman-key --init --gpgdir /arm64-rootfs/etc/pacman.d/gnupg
-          pacman-key --populate archlinuxarm --gpgdir /arm64-rootfs/etc/pacman.d/gnupg
-
       - name: Install base system
         run: |
-          # First sync package databases using the ARM64 mirror
-          pacman -Syy --config /tmp/pacman-arm64.conf
-          
           # Install base system with ARM64 emulation
           pacstrap -C /tmp/pacman-arm64.conf -G -M -K /arm64-rootfs \
             base \
@@ -90,8 +74,7 @@ jobs:
             git \
             man-db \
             man-pages \
-            texinfo \
-            --needed
+            texinfo
           
           # Copy QEMU static binary
           cp /usr/bin/qemu-aarch64-static /arm64-rootfs/usr/bin/
@@ -114,9 +97,8 @@ jobs:
           # Network
           echo "127.0.1.1 alarm.localdomain alarm" >> /arm64-rootfs/etc/hosts
           
-          # Configure pacman in target
+          # Update mirrorlist for ARM64
           echo "Server = http://mirror.archlinuxarm.org/\$arch/\$repo" > /arm64-rootfs/etc/pacman.d/mirrorlist
-          sed -i 's/^SigLevel.*/SigLevel = Never/' /arm64-rootfs/etc/pacman.conf
 
       - name: Cleanup system
         run: |
@@ -125,7 +107,6 @@ jobs:
           touch /arm64-rootfs/etc/machine-id
           rm -rf /arm64-rootfs/var/cache/pacman/pkg/*
           rm -rf /arm64-rootfs/var/lib/pacman/sync/*
-          rm -rf /arm64-rootfs/etc/pacman.d/gnupg/*
 
       - name: Create artifact
         run: |
