@@ -39,29 +39,32 @@ jobs:
         run: |
           mkdir -p /arm64-rootfs
           
-          # Create minimal pacman.conf for ARM64
+          # Create minimal pacman.conf for ARM64 with only Arch Linux ARM mirrors
           cat > /tmp/pacman-arm64.conf <<EOF
           [options]
           Architecture = aarch64
           ParallelDownloads = 5
           Color
           
-          [core]
-          Include = /etc/pacman.d/mirrorlist
-          
-          [extra]
-          Include = /etc/pacman.d/mirrorlist
-          
-          [community]
-          Include = /etc/pacman.d/mirrorlist
-          
           [alarm]
+          Server = http://mirror.archlinuxarm.org/\$arch/\$repo
+          
+          [aur]
           Server = http://mirror.archlinuxarm.org/\$arch/\$repo
           EOF
 
+          # Create mirrorlist with only Arch Linux ARM mirrors
+          mkdir -p /arm64-rootfs/etc/pacman.d
+          echo "Server = http://mirror.archlinuxarm.org/\$arch/\$repo" > /arm64-rootfs/etc/pacman.d/mirrorlist
+
       - name: Install base system
         run: |
-          # Install base system with ARM64 emulation
+          # First initialize the keyring in the target root
+          mkdir -p /arm64-rootfs/etc/pacman.d/gnupg
+          pacman-key --init --gpgdir /arm64-rootfs/etc/pacman.d/gnupg
+          pacman-key --populate --gpgdir /arm64-rootfs/etc/pacman.d/gnupg archlinuxarm
+
+          # Install base system using only ARM64 packages
           pacstrap -C /tmp/pacman-arm64.conf -G -M -K /arm64-rootfs \
             base \
             base-devel \
@@ -74,7 +77,8 @@ jobs:
             git \
             man-db \
             man-pages \
-            texinfo
+            texinfo \
+            --arch aarch64
           
           # Copy QEMU static binary
           cp /usr/bin/qemu-aarch64-static /arm64-rootfs/usr/bin/
@@ -96,9 +100,6 @@ jobs:
           
           # Network
           echo "127.0.1.1 alarm.localdomain alarm" >> /arm64-rootfs/etc/hosts
-          
-          # Update mirrorlist for ARM64
-          echo "Server = http://mirror.archlinuxarm.org/\$arch/\$repo" > /arm64-rootfs/etc/pacman.d/mirrorlist
 
       - name: Cleanup system
         run: |
