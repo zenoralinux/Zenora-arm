@@ -72,7 +72,7 @@ jobs:
       - name: Create GitHub Release in `zenora-android`
         uses: softprops/action-gh-release@v2
         with:
-          repository: miladalizadeh/zenora-android  # یا username/repo-name
+          repository: zenoralinux/zenora-android  # یا username/repo-name
           tag_name: ${{ steps.tag.outputs.tag_name }}
           name: Zenora ARM64 RootFS ${{ steps.tag.outputs.tag_name }}
           files: ${{ github.workspace }}/zenroalinux-arm64-rootfs.tar.gz
