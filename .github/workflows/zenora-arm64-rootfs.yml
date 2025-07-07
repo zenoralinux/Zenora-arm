@@ -58,11 +58,11 @@ jobs:
             cp /etc/pacman.conf "$ROOTFS_DIR"/etc/pacman.conf
             sudo rm -rf "$ROOTFS_DIR"/var/cache/pacman/pkg/*
             echo "PACMAN_IGNORE_LANDLOCK=1" >> "$ROOTFS_DIR"/etc/environment
-            sudo find "$ROOTFS_DIR" -type d -exec chmod 755 {} \; &
-            sudo find "$ROOTFS_DIR" -type f -exec chmod 644 {} \; &
-            sudo chmod -R 755 "$ROOTFS_DIR"/usr/{bin,lib,libexec,sbin} &
-            sudo chmod -R 755 "$ROOTFS_DIR"/bin "$ROOTFS_DIR"/sbin &
-            tar -czvf /output/zenroalinux-arm64-rootfs.tar.gz -C "$ROOTFS_DIR" .
+            # sudo find "$ROOTFS_DIR" -type d -exec chmod 755 {} \; &
+            # sudo find "$ROOTFS_DIR" -type f -exec chmod 644 {} \; &
+            # sudo chmod -R 755 "$ROOTFS_DIR"/usr/{bin,lib,libexec,sbin} &
+            # sudo chmod -R 755 "$ROOTFS_DIR"/bin "$ROOTFS_DIR"/sbin &
+            tar --hard-dereference --numeric-owner --preserve-permissions \-czf /output/zenroalinux-arm64-rootfs.tar.gz -C "$ROOTFS_DIR" .
             ls -lh /output/zenroalinux-arm64-rootfs.tar.gz
 
       - name: Set release tag
