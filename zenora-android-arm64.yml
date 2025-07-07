@@ -9,21 +9,16 @@ on:
 jobs:
   build-arm64:
     runs-on: ubuntu-latest
-    outputs:
-      tag: ${{ steps.set_tag.outputs.TAG }}
 
     steps:
-      # فعال‌سازی QEMU برای پشتیبانی از معماری aarch64
       - name: Enable QEMU for aarch64
         uses: docker/setup-qemu-action@v3
         with:
           platforms: all
 
-      # کلون کردن مخزن
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ساخت RootFS در داخل کانتینر ARM64
       - name: Build ARM64 RootFS in container
         uses: addnab/docker-run-action@v3
         with:
@@ -31,98 +26,59 @@ jobs:
           options: --platform linux/arm64 --privileged -v ${{ github.workspace }}:/output
           shell: bash
           run: |
-            set -e
+            set -eux
 
             pacman -Syu --noconfirm --needed arch-install-scripts pacman-contrib wget curl base-devel sudo
 
             ROOTFS_DIR=~/zenora-rootfs
             mkdir -p "$ROOTFS_DIR"
-
-            # اضافه کردن مخازن سفارشی
             sed -i '/^\[core\]/i\
             [zrepo]\
             SigLevel = Never\
             Server = https://codeberg.org/zenoralinux/zenora-repo/raw/branch/main/$arch' /etc/pacman.conf
-
+             
             sed -i '/^\[core\]/i\
             [zc-repo]\
             SigLevel = Never\
             Server = https://codeberg.org/zenoralinux/zc-repo/raw/branch/main/zcrepo/$arch' /etc/pacman.conf
-
+            
             sudo pacstrap -G -M -C /etc/pacman.conf "$ROOTFS_DIR" \
               base curl wget nano sudo texinfo man-db man-pages zsh shadow \
-              bash coreutils file sed tar zstd pacman zenora-release zrepo/neofetch \
-              zenora-zsh-config zenora-conf-update zenora-fake-apt zenora-back
+              bash coreutils file sed tar zstd pacman zenora-release zrepo/neofetch zenora-zsh-config  \
+              zenora-fake-apt zenora-back 
 
-            # تنظیم locale
             sudo sed -i 's/^#en_US.UTF-8/en_US.UTF-8/' "$ROOTFS_DIR"/etc/locale.gen
             arch-chroot "$ROOTFS_DIR" locale-gen
-
-            # ایجاد کاربر zenora با zsh
+            
             arch-chroot "$ROOTFS_DIR" useradd -m -G wheel -s /bin/zsh zenora
             echo 'zenora:zenora' | arch-chroot "$ROOTFS_DIR" chpasswd
             echo '%wheel ALL=(ALL:ALL) NOPASSWD: ALL' >> "$ROOTFS_DIR/etc/sudoers"
 
-            # تنظیم zsh به عنوان شل پیش‌فرض
             sed -i 's|^SHELL=.*|SHELL=/bin/zsh|' "$ROOTFS_DIR"/etc/default/useradd
             touch "$ROOTFS_DIR"/etc/skel/.zshrc
-
-            # حل مشکل DNS
+            
             echo "nameserver 1.1.1.1" > "$ROOTFS_DIR"/etc/resolv.conf
-
-            # کپی pacman.conf
             cp /etc/pacman.conf "$ROOTFS_DIR"/etc/pacman.conf
-
-            # حذف کش بسته‌ها
             sudo rm -rf "$ROOTFS_DIR"/var/cache/pacman/pkg/*
-
-            # حذف پیام‌های landlock
             echo "PACMAN_IGNORE_LANDLOCK=1" >> "$ROOTFS_DIR"/etc/environment
-
-            # اصلاح دسترسی‌ها
+            
             find "$ROOTFS_DIR" -type d -exec chmod 755 {} \;
             find "$ROOTFS_DIR" -type f -exec chmod 644 {} \;
             chmod -R 755 "$ROOTFS_DIR"/usr/{bin,lib,libexec,sbin}
             chmod -R 755 "$ROOTFS_DIR"/bin "$ROOTFS_DIR"/sbin
-
-            # ساخت فایل فشرده
+         
             tar -czvf /output/zenroalinux-arm64-rootfs.tar.gz -C "$ROOTFS_DIR" .
             ls -lh /output/zenroalinux-arm64-rootfs.tar.gz
 
-      # آپلود فایل ساخته‌شده به عنوان artifact موقت
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: zenora-arm64-rootfs
-          path: zenroalinux-arm64-rootfs.tar.gz
+      - name: Set release tag variable
+        id: tag
+        run: echo "tag_name=arm64-rootfs-$(date +'%Y-%m-%d')" >> "$GITHUB_OUTPUT"
 
-      # ایجاد مقدار tag بر اساس تاریخ
-      - name: Set tag
-        id: set_tag
-        run: |
-          TAG=$(date -u +"%Y%m%d-%H%M")
-          echo "TAG=$TAG" >> $GITHUB_OUTPUT
-
-  release:
-    needs: build-arm64
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      # دریافت artifact مرحله قبل
-      - name: Download artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: zenora-arm64-rootfs
-
-      # ایجاد رلیز و انتشار فایل فشرده
       - name: Create GitHub Release
-        uses: ncipollo/release-action@v1
+        uses: softprops/action-gh-release@v2
         with:
-          tag: ${{ needs.build-arm64.outputs.tag }}
-          name: "Zenora ARM64 RootFS ${{ needs.build-arm64.outputs.tag }}"
-          artifacts: "zenroalinux-arm64-rootfs.tar.gz"
-          allowUpdates: true
-          draft: false
-          prerelease: false
+          tag_name: ${{ steps.tag.outputs.tag_name }}
+          name: Zenora ARM64 RootFS ${{ steps.tag.outputs.tag_name }}
+          files: ${{ github.workspace }}/zenroalinux-arm64-rootfs.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
