@@ -62,10 +62,10 @@ jobs:
             sudo rm -rf "$ROOTFS_DIR"/var/cache/pacman/pkg/*
             echo "PACMAN_IGNORE_LANDLOCK=1" >> "$ROOTFS_DIR"/etc/environment
             
-            find "$ROOTFS_DIR" -type d -exec chmod 755 {} \;
-            find "$ROOTFS_DIR" -type f -exec chmod 644 {} \;
-            chmod -R 755 "$ROOTFS_DIR"/usr/{bin,lib,libexec,sbin}
-            chmod -R 755 "$ROOTFS_DIR"/bin "$ROOTFS_DIR"/sbin
+            sudo find "$ROOTFS_DIR" -type d -exec chmod 755 {} \;
+            sudo find "$ROOTFS_DIR" -type f -exec chmod 644 {} \;
+            sudo chmod -R 755 "$ROOTFS_DIR"/usr/{bin,lib,libexec,sbin}
+            sudo chmod -R 755 "$ROOTFS_DIR"/bin "$ROOTFS_DIR"/sbin
          
             tar -czvf /output/zenroalinux-arm64-rootfs.tar.gz -C "$ROOTFS_DIR" .
             ls -lh /output/zenroalinux-arm64-rootfs.tar.gz
