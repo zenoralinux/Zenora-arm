@@ -1,11 +1,11 @@
-name: zenora ARM64 AUR Repository Builder
+name: zenora ARM64 RootFS Builder
 
 on:
   push:
     branches: [ main ]
   schedule:
-    - cron: '0 3 * * *'  # اجرای روزانه ساعت 03:00 UTC
- 
+    - cron: '0 3 * * *'  # اجرای روزانه
+
 permissions:
   contents: write
 
@@ -30,51 +30,75 @@ jobs:
           shell: bash
           run: |
             set -eux
+
             pacman -Syu --noconfirm --needed arch-install-scripts pacman-contrib wget curl base-devel sudo
+
             ROOTFS_DIR=~/zenora-rootfs
             mkdir -p "$ROOTFS_DIR"
+
+            # افزودن مخازن zrepo و zc-repo
             sed -i '/^\[core\]/i\
             [zrepo]\
             SigLevel = Never\
-            Server = https://codeberg.org/zenoralinux/zenora-repo/raw/branch/main/$arch' /etc/pacman.conf
-            sed -i '/^\[core\]/i\
+            Server = https://codeberg.org/zenoralinux/zenora-repo/raw/branch/main/$arch\n\
             [zc-repo]\
             SigLevel = Never\
             Server = https://codeberg.org/zenoralinux/zc-repo/raw/branch/main/zcrepo/$arch' /etc/pacman.conf
 
+            # نصب سیستم پایه با پکیج‌های سفارشی
             sudo pacstrap -G -M -C /etc/pacman.conf "$ROOTFS_DIR" \
               base curl wget nano sudo texinfo man-db man-pages zsh shadow \
-              bash coreutils file sed tar zstd pacman zenora-release zrepo/neofetch zenora-zsh-config zenora-conf-update \
+              bash coreutils file sed tar zstd pacman \
+              zenora-release zrepo/neofetch zenora-zsh-config zenora-conf-update \
               zenora-fake-apt zenora-back zenora-conf-update
 
-            sudo sed -i 's/^#en_US.UTF-8/en_US.UTF-8/' "$ROOTFS_DIR"/etc/locale.gen
+            # فعال‌سازی locale
+            sed -i 's/^#en_US.UTF-8/en_US.UTF-8/' "$ROOTFS_DIR"/etc/locale.gen
             arch-chroot "$ROOTFS_DIR" locale-gen
+
+            # ساخت کاربر zenora با sudo بدون رمز
             arch-chroot "$ROOTFS_DIR" useradd -m -G wheel -s /bin/zsh zenora
             echo 'zenora:zenora' | arch-chroot "$ROOTFS_DIR" chpasswd
-            echo '%wheel ALL=(ALL:ALL) NOPASSWD: ALL' >> "$ROOTFS_DIR/etc/sudoers"
+            echo '%wheel ALL=(ALL:ALL) NOPASSWD: ALL' >> "$ROOTFS_DIR"/etc/sudoers
+
+            # رفع مشکلات احتمالی مربوط به sudo و مالکیت فایل‌ها
+            chown root:root "$ROOTFS_DIR"/etc/sudo.conf
+            chown root:root "$ROOTFS_DIR"/etc/sudoers
+
+            # تنظیمات پیش‌فرض برای zsh
+            echo 'exec zsh' > "$ROOTFS_DIR"/home/zenora/.bash_profile
+            cp "$ROOTFS_DIR"/home/zenora/.bash_profile "$ROOTFS_DIR"/home/zenora/.zprofile
+            chown zenora:zenora "$ROOTFS_DIR"/home/zenora/.bash_profile "$ROOTFS_DIR"/home/zenora/.zprofile
+
+            # اصلاح مسیر shell پیش‌فرض
             sed -i 's|^SHELL=.*|SHELL=/bin/zsh|' "$ROOTFS_DIR"/etc/default/useradd
-            touch "$ROOTFS_DIR"/etc/skel/.zshrc
+
+            # DNS برای محیط proot
             echo "nameserver 1.1.1.1" > "$ROOTFS_DIR"/etc/resolv.conf
-            cp /etc/pacman.conf "$ROOTFS_DIR"/etc/pacman.conf
-            sudo rm -rf "$ROOTFS_DIR"/var/cache/pacman/pkg/*
+            echo "options edns0 trust-ad" >> "$ROOTFS_DIR"/etc/resolv.conf
+
+            # رفع ارور landlock در pacman
             echo "PACMAN_IGNORE_LANDLOCK=1" >> "$ROOTFS_DIR"/etc/environment
-            # sudo find "$ROOTFS_DIR" -type d -exec chmod 755 {} \; &
-            # sudo find "$ROOTFS_DIR" -type f -exec chmod 644 {} \; &
-            # sudo chmod -R 755 "$ROOTFS_DIR"/usr/{bin,lib,libexec,sbin} &
-            # sudo chmod -R 755 "$ROOTFS_DIR"/bin "$ROOTFS_DIR"/sbin &
-            tar --hard-dereference --numeric-owner --preserve-permissions \-czf /output/zenroalinux-arm64-rootfs.tar.gz -C "$ROOTFS_DIR" .
-            ls -lh /output/zenroalinux-arm64-rootfs.tar.gz
+            echo "unset LD_PRELOAD" >> "$ROOTFS_DIR"/etc/profile
+
+            # پاکسازی فایل‌های غیرضروری
+            rm -rf "$ROOTFS_DIR"/var/cache/pacman/pkg/*
+            rm -rf "$ROOTFS_DIR"/var/log/* "$ROOTFS_DIR"/tmp/*
+
+            # ساخت آرشیو نهایی
+            tar --hard-dereference --numeric-owner --preserve-permissions \
+              -czf /output/zenora-arm64-rootfs.tar.gz -C "$ROOTFS_DIR" .
 
       - name: Set release tag
         id: tag
         run: echo "tag_name=arm64-rootfs-$(date +'%Y-%m-%d')" >> "$GITHUB_OUTPUT"
 
-      - name: Create GitHub Release in `zenora-android`
+      - name: Upload to zenora-android GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          repository: zenoralinux/zenora-android  # یا username/repo-name
+          repository: zenoralinux/zenora-android
           tag_name: ${{ steps.tag.outputs.tag_name }}
           name: Zenora ARM64 RootFS ${{ steps.tag.outputs.tag_name }}
-          files: ${{ github.workspace }}/zenroalinux-arm64-rootfs.tar.gz
+          files: ${{ github.workspace }}/zenora-arm64-rootfs.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.ZENORA_ANDROID_PAT }}
