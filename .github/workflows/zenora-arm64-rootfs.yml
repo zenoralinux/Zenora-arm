@@ -84,11 +84,16 @@ jobs:
             echo "options edns0 trust-ad" >> "$ROOTFS_DIR"/etc/resolv.conf
             echo "PACMAN_IGNORE_LANDLOCK=1" >> "$ROOTFS_DIR"/etc/environment
             echo "unset LD_PRELOAD" >> "$ROOTFS_DIR"/etc/profile
-
+            # غیر فعال کردن سرویس های systemd
+            arch-chroot "$ROOTFS_DIR" systemctl mask systemd-binfmt.service systemd-resolved.service systemd-networkd.service tmp.mount
             # پاکسازی cache و log
+            # پاکسازی کلیدها، کش و تنظیم مجدد machine-id
+            rm -rf "$ROOTFS_DIR"/etc/pacman.d/gnupg
+            rm -rf "$ROOTFS_DIR"/var/lib/pacman/sync/
+            rm -f "$ROOTFS_DIR"/etc/machine-id
+            touch "$ROOTFS_DIR"/etc/machine-id
             rm -rf "$ROOTFS_DIR"/var/cache/pacman/pkg/*
             rm -rf "$ROOTFS_DIR"/var/log/* "$ROOTFS_DIR"/tmp/*
-
             # ایجاد آرشیو
             tar --hard-dereference --numeric-owner --preserve-permissions \
               -czf /output/zenora-arm64-rootfs.tar.gz -C "$ROOTFS_DIR" .
