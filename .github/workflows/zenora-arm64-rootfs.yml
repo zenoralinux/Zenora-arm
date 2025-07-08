@@ -1,10 +1,10 @@
-name: zenora ARM64 RootFS Builder
- 
+name: zenora ARM64 RootFS Builder (Optimized)
+
 on: 
   push:
     branches: [ main ]
   schedule:
-    - cron: '0 3 * * *'  # اجرای روزانه
+    - cron: '0 3 * * *'
 
 permissions:
   contents: write
@@ -29,76 +29,102 @@ jobs:
           options: --platform linux/arm64 --privileged -v ${{ github.workspace }}:/output
           shell: bash
           run: |
-            set -eux
+            set -euxo pipefail
 
+            # نصب پیش نیازها
             pacman -Syu --noconfirm --needed arch-install-scripts pacman-contrib wget curl base-devel sudo gnupg
 
+            # تنظیمات اولیه
             ROOTFS_DIR=~/zenora-rootfs
             mkdir -p "$ROOTFS_DIR"
+            chmod 755 "$ROOTFS_DIR"
 
-            # افزودن مخازن سفارشی
+            # افزودن مخازن با سیاست امضای محدود
             sed -i '/^\[core\]/i\
             [zrepo]\
-            SigLevel = Never\
-            Server = https://codeberg.org/zenoralinux/zenora-repo/raw/branch/main/$arch' /etc/pacman.conf
-            sed -i '/^\[core\]/i\
+            SigLevel = PackageRequired\
+            Server = https://codeberg.org/zenoralinux/zenora-repo/raw/branch/main/aarch64\n\
             [zc-repo]\
-            SigLevel = Never\
-            Server = https://codeberg.org/zenoralinux/zc-repo/raw/branch/main/zcrepo/$arch' /etc/pacman.conf
+            SigLevel = PackageRequired\
+            Server = https://codeberg.org/zenoralinux/zc-repo/raw/branch/main/zcrepo/aarch64' /etc/pacman.conf
 
-            # نصب سیستم پایه
-            sudo pacstrap -G -M -C /etc/pacman.conf "$ROOTFS_DIR" \
+            # نصب سیستم پایه با کنترل دقیق permission ها
+            pacstrap -C /etc/pacman.conf -G -M "$ROOTFS_DIR" \
               base curl wget nano sudo texinfo man-db man-pages zsh shadow \
               bash coreutils file sed tar zstd pacman gnupg \
               zenora-release zrepo/neofetch zenora-zsh-config zenora-conf-update \
               zenora-fake-apt zenora-back zenora-conf-update
 
-            # اصلاح Locale
+            # تنظیمات Locale
             sed -i 's/^#en_US.UTF-8/en_US.UTF-8/' "$ROOTFS_DIR"/etc/locale.gen
+            echo "LANG=en_US.UTF-8" > "$ROOTFS_DIR"/etc/locale.conf
             arch-chroot "$ROOTFS_DIR" locale-gen
 
-            # حذف keyring موجود (برای اطمینان از پاک بودن)
+            # مدیریت کلیدهای GPG با دسترسی‌های امن
             rm -rf "$ROOTFS_DIR"/etc/pacman.d/gnupg
             arch-chroot "$ROOTFS_DIR" pacman-key --init
             arch-chroot "$ROOTFS_DIR" pacman-key --populate archlinux
+            install -d -m 700 -o root -g root "$ROOTFS_DIR"/etc/pacman.d/gnupg
+            chmod 600 "$ROOTFS_DIR"/etc/pacman.d/gnupg/*
 
-            # مجوزهای درست برای gnupg
-            chown -R root:root "$ROOTFS_DIR"/etc/pacman.d
-            chmod -R 755 "$ROOTFS_DIR"/etc/pacman.d
+            # ایجاد کاربر با گروه اختصاصی
+            arch-chroot "$ROOTFS_DIR" /usr/bin/bash <<-'EOF'
+            groupadd -r zenora
+            useradd -m -G wheel,zenora -s /bin/zsh zenora
+            echo 'zenora:zenora' | chpasswd
+            EOF
 
-            # ساخت کاربر با sudo بدون رمز
-            arch-chroot "$ROOTFS_DIR" useradd -m -G wheel -s /bin/zsh zenora
-            echo 'zenora:zenora' | arch-chroot "$ROOTFS_DIR" chpasswd
-            echo '%wheel ALL=(ALL:ALL) NOPASSWD: ALL' >> "$ROOTFS_DIR"/etc/sudoers
-            chown root:root "$ROOTFS_DIR"/etc/sudo.conf
-            chown root:root "$ROOTFS_DIR"/etc/sudoers
+            # تنظیم مالکیت پس از اطمینان از وجود کاربر
+            arch-chroot "$ROOTFS_DIR" /usr/bin/bash <<-'EOF'
+            chown -R zenora:zenora /home/zenora
+            chmod 700 /home/zenora
+            chmod 600 /home/zenora/.*profile
+            EOF
 
-            # تنظیمات shell و zsh برای کاربر
+            # تنظیمات sudo امن
+            install -d -m 750 -o root -g root "$ROOTFS_DIR"/etc/sudoers.d
+            echo '%wheel ALL=(ALL:ALL) ALL' > "$ROOTFS_DIR"/etc/sudoers.d/10-wheel
+            chmod 440 "$ROOTFS_DIR"/etc/sudoers.d/10-wheel
+            echo 'Defaults !tty_tickets' >> "$ROOTFS_DIR"/etc/sudoers.d/10-wheel
+            echo 'Defaults timestamp_timeout=15' >> "$ROOTFS_DIR"/etc/sudoers.d/10-wheel
+
+            # تنظیمات shell ایمن
+            install -d -m 700 -o zenora -g zenora "$ROOTFS_DIR"/home/zenora
             echo 'exec zsh' > "$ROOTFS_DIR"/home/zenora/.bash_profile
-            cp "$ROOTFS_DIR"/home/zenora/.bash_profile "$ROOTFS_DIR"/home/zenora/.zprofile
-            chown zenora:zenora "$ROOTFS_DIR"/home/zenora/.bash_profile "$ROOTFS_DIR"/home/zenora/.zprofile
+            echo 'export PACMAN_IGNORE_LANDLOCK=1' > "$ROOTFS_DIR"/home/zenora/.zprofile
+            echo 'unset LD_PRELOAD' >> "$ROOTFS_DIR"/home/zenora/.zprofile
+            chown zenora:zenora "$ROOTFS_DIR"/home/zenora/.*profile
+            chmod 600 "$ROOTFS_DIR"/home/zenora/.*profile
 
-            sed -i 's|^SHELL=.*|SHELL=/bin/zsh|' "$ROOTFS_DIR"/etc/default/useradd
-
-            # DNS و محیط proot
+            # تنظیمات شبکه و سیستم
+            install -d -m 755 -o root -g root "$ROOTFS_DIR"/etc
             echo "nameserver 1.1.1.1" > "$ROOTFS_DIR"/etc/resolv.conf
+            echo "nameserver 8.8.8.8" >> "$ROOTFS_DIR"/etc/resolv.conf
             echo "options edns0 trust-ad" >> "$ROOTFS_DIR"/etc/resolv.conf
-            echo "PACMAN_IGNORE_LANDLOCK=1" >> "$ROOTFS_DIR"/etc/environment
-            echo "unset LD_PRELOAD" >> "$ROOTFS_DIR"/etc/profile
-            # غیر فعال کردن سرویس های systemd
-            arch-chroot "$ROOTFS_DIR" systemctl mask systemd-binfmt.service systemd-resolved.service systemd-networkd.service tmp.mount
-            # پاکسازی cache و log
-            # پاکسازی کلیدها، کش و تنظیم مجدد machine-id
-            rm -rf "$ROOTFS_DIR"/etc/pacman.d/gnupg
-            rm -rf "$ROOTFS_DIR"/var/lib/pacman/sync/
+            chmod 644 "$ROOTFS_DIR"/etc/resolv.conf
+
+            # غیرفعال کردن سرویس‌های غیرضروری
+            arch-chroot "$ROOTFS_DIR" systemctl mask \
+              systemd-binfmt.service \
+              systemd-resolved.service \
+              systemd-networkd.service \
+              tmp.mount
+
+            # پاکسازی و بهینه‌سازی
+            rm -rf "$ROOTFS_DIR"/var/lib/pacman/sync/*
             rm -f "$ROOTFS_DIR"/etc/machine-id
-            touch "$ROOTFS_DIR"/etc/machine-id
+            : > "$ROOTFS_DIR"/etc/machine-id
+            chmod 444 "$ROOTFS_DIR"/etc/machine-id
             rm -rf "$ROOTFS_DIR"/var/cache/pacman/pkg/*
             rm -rf "$ROOTFS_DIR"/var/log/* "$ROOTFS_DIR"/tmp/*
-            rm -rf "$ROOTFS_DIR"/{proc,sys,dev,run,tmp}
-            # ایجاد آرشیو
-            tar --hard-dereference --numeric-owner --preserve-permissions \
-              -czf /output/zenora-arm64-rootfs.tar.gz -C "$ROOTFS_DIR" .
+
+            # تنظیم مجدد مالکیت‌های اصلی
+            arch-chroot "$ROOTFS_DIR" chown -R root:root /usr /etc /var
+            arch-chroot "$ROOTFS_DIR" chmod 755 / /usr /etc /var
+
+            # ایجاد آرشیو با حفظ permission ها
+            tar --numeric-owner --xattrs --acls --hard-dereference --preserve-permissions \
+              -czf /output/zenora-arm64-rootfs-$(date +%Y%m%d).tar.gz -C "$ROOTFS_DIR" .
 
       - name: Set release tag
         id: tag
@@ -110,6 +136,6 @@ jobs:
           repository: zenoralinux/zenora-android
           tag_name: ${{ steps.tag.outputs.tag_name }}
           name: Zenora ARM64 RootFS ${{ steps.tag.outputs.tag_name }}
-          files: ${{ github.workspace }}/zenora-arm64-rootfs.tar.gz
+          files: ${{ github.workspace }}/zenora-arm64-rootfs-*.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.ZENORA_ANDROID_PAT }}
