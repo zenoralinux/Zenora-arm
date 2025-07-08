@@ -5,7 +5,7 @@ on:
     branches: [ main ]
   schedule:
     - cron: '0 3 * * *'  # اجرای روزانه ساعت 03:00 UTC
- 
+
 permissions:
   contents: write
 
@@ -30,30 +30,75 @@ jobs:
           shell: bash
           run: |
             set -eux
-            pacman -Syu --noconfirm --needed arch-install-scripts pacman-contrib wget curl base-devel sudo
+
+            # به‌روزرسانی و نصب ابزارهای لازم
+            pacman -Syu --noconfirm --needed arch-install-scripts pacman-contrib wget curl base-devel nano texinfo man-db man-pages zsh shadow bash coreutils file sed tar zstd pacman sudo
+
             ROOTFS_DIR=~/zenora-rootfs
             mkdir -p "$ROOTFS_DIR"
+
+            # اضافه کردن مخازن اختصاصی zenora
             sed -i '/^\[core\]/i\
             [zrepo]\
             SigLevel = Never\
             Server = https://codeberg.org/zenoralinux/zenora-repo/raw/branch/main/$arch' /etc/pacman.conf
+
             sed -i '/^\[core\]/i\
             [zc-repo]\
             SigLevel = Never\
             Server = https://codeberg.org/zenoralinux/zc-repo/raw/branch/main/zcrepo/$arch' /etc/pacman.conf
 
+            # ساخت rootfs بدون نصب بسته‌های مربوط به systemd
             sudo pacstrap -G -M -C /etc/pacman.conf "$ROOTFS_DIR" \
-              base curl wget nano sudo texinfo man-db man-pages zsh shadow \
+              base curl wget nano texinfo man-db man-pages zsh shadow \
               bash coreutils file sed tar zstd pacman zenora-release zrepo/neofetch zenora-zsh-config \
-              zenora-fake-apt zenora-back 
+              zenora-fake-apt zenora-back
 
+            # فعال کردن locale
             sudo sed -i 's/^#en_US.UTF-8/en_US.UTF-8/' "$ROOTFS_DIR"/etc/locale.gen
             arch-chroot "$ROOTFS_DIR" locale-gen
-            touch "$ROOTFS_DIR"/etc/skel/.zshrc
+
+            # ساخت پوشه‌های مورد نیاز برای proot
+            mkdir -p "$ROOTFS_DIR"/{proc,sys,dev,run,tmp}
+            chmod 1777 "$ROOTFS_DIR"/tmp
+
+            # ساخت فایل‌های لازم برای proot
+            ln -sf /proc/mounts "$ROOTFS_DIR"/etc/mtab
+            echo "localhost" > "$ROOTFS_DIR"/etc/hostname
+
+            # تنظیم DNS
             echo "nameserver 8.8.8.8" > "$ROOTFS_DIR"/etc/resolv.conf
-            cp /etc/pacman.conf "$ROOTFS_DIR"/etc/pacman.conf
+
+            # جلوگیری از خطاهای landlock برای pacman
             echo "PACMAN_IGNORE_LANDLOCK=1" >> "$ROOTFS_DIR"/etc/environment
-            tar --hard-dereference --numeric-owner --preserve-permissions \-czf /output/zenroalinux-arm64-rootfs.tar.gz -C "$ROOTFS_DIR" .
+            echo "export PACMAN_IGNORE_LANDLOCK=1" >> "$ROOTFS_DIR"/etc/profile
+
+            # حذف sudo یا جایگزین کردن با alias (چون sudo در proot کار نمی‌کند)
+            rm -f "$ROOTFS_DIR"/usr/bin/sudo
+            echo "alias sudo=''" >> "$ROOTFS_DIR"/etc/skel/.zshrc
+            echo "alias sudo=''" >> "$ROOTFS_DIR"/root/.zshrc
+
+            # ساخت کاربر zenora (غیر root)
+            echo "zenora:x:1000:1000::/home/zenora:/bin/zsh" >> "$ROOTFS_DIR"/etc/passwd
+            echo "zenora:x:1000:" >> "$ROOTFS_DIR"/etc/group
+            mkdir -p "$ROOTFS_DIR"/home/zenora
+            chown -R 1000:1000 "$ROOTFS_DIR"/home/zenora
+            cp "$ROOTFS_DIR"/etc/skel/.zshrc "$ROOTFS_DIR"/home/zenora/.zshrc
+
+            # اطمینان از وجود ld-linux برای اجرای باینری‌ها
+            if [ ! -f "$ROOTFS_DIR"/lib/ld-linux-aarch64.so.1 ]; then
+              cp /usr/lib/ld-linux-aarch64.so.1 "$ROOTFS_DIR"/lib/
+            fi
+
+            # کپی pacman.conf به rootfs برای اطمینان
+            cp /etc/pacman.conf "$ROOTFS_DIR"/etc/pacman.conf
+
+            # خالی کردن کش pacman در rootfs (اختیاری)
+            rm -rf "$ROOTFS_DIR"/var/cache/pacman/pkg/*
+
+            # ایجاد فایل tar.gz خروجی با حفظ مالکیت و مجوزها
+            tar --hard-dereference --numeric-owner --preserve-permissions -czf /output/zenroalinux-arm64-rootfs.tar.gz -C "$ROOTFS_DIR" .
+
             ls -lh /output/zenroalinux-arm64-rootfs.tar.gz
 
       - name: Set release tag
@@ -63,7 +108,7 @@ jobs:
       - name: Create GitHub Release in `zenora-android`
         uses: softprops/action-gh-release@v2
         with:
-          repository: zenoralinux/zenora-android  # یا username/repo-name
+          repository: zenoralinux/zenora-android
           tag_name: ${{ steps.tag.outputs.tag_name }}
           name: Zenora ARM64 RootFS ${{ steps.tag.outputs.tag_name }}
           files: ${{ github.workspace }}/zenroalinux-arm64-rootfs.tar.gz
