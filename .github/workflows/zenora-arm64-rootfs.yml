@@ -40,10 +40,10 @@ jobs:
             sed -i '/^\[core\]/i\
             [zrepo]\
             SigLevel = Never\
-            Server = https://codeberg.org/zenoralinux/zenora-repo/raw/branch/main/$arch\n\
+            Server = https://codeberg.org/zenoralinux/zenora-repo/raw/branch/main/aarch64\n\
             [zc-repo]\
             SigLevel = Never\
-            Server = https://codeberg.org/zenoralinux/zc-repo/raw/branch/main/zcrepo/$arch' /etc/pacman.conf
+            Server = https://codeberg.org/zenoralinux/zc-repo/raw/branch/main/zcrepo/aarch64' /etc/pacman.conf
 
             # نصب سیستم پایه
             sudo pacstrap -G -M -C /etc/pacman.conf "$ROOTFS_DIR" \
