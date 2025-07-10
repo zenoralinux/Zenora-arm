@@ -90,7 +90,7 @@ jobs:
             echo "zenora ALL=(ALL) NOPASSWD: ALL" >> "$ROOTFS_DIR"/etc/sudoers
 
             mkdir -p "$ROOTFS_DIR"/home/zenora
-            cp "$ROOTFS_DIR"/etc/skel/.zshrc "$ROOTFS_DIR"/home/zenora/.zshrc
+            touch "$ROOTFS_DIR"/home/zenora/.zshrc
             touch "$ROOTFS_DIR"/home/zenora/.zprofile
             chown -R 1000:1000 "$ROOTFS_DIR"/home/zenora
 
