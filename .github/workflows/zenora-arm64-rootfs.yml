@@ -72,10 +72,6 @@ jobs:
             chmod 1777 "$ROOTFS_DIR"/tmp
             ln -sf /proc/mounts "$ROOTFS_DIR"/etc/mtab
 
-            # /dev/null و urandom برای جلوگیری از خطای ترموکس
-            mknod -m 666 "$ROOTFS_DIR"/dev/null c 1 3 || true
-            mknod -m 666 "$ROOTFS_DIR"/dev/urandom c 1 9 || true
-
             # اطمینان از وجود ld-linux
             if [ ! -f "$ROOTFS_DIR"/lib/ld-linux-aarch64.so.1 ]; then
               cp /usr/lib/ld-linux-aarch64.so.1 "$ROOTFS_DIR"/lib/
