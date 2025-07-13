@@ -90,10 +90,6 @@ jobs:
             touch "$ROOTFS_DIR"/home/zenora/.zprofile
             chown -R 1000:1000 "$ROOTFS_DIR"/home/zenora
 
-            # شبیه‌سازی sudo بدون setuid
-            echo -e '#!/bin/sh\nexec "$@"' > "$ROOTFS_DIR"/usr/bin/sudo
-            chmod +x "$ROOTFS_DIR"/usr/bin/sudo
-
             # کپی pacman.conf نهایی
             cp /etc/pacman.conf "$ROOTFS_DIR"/etc/pacman.conf
 
