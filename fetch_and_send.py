@@ -10,8 +10,7 @@ CHAT_ID = '@zenoravpn'
 DB_PATH = 'configs.db'
 channels = ['mrsoulb', 'Proxymaco']
 
-
-MAX_DB_SIZE_MB = 50  # محدودیت حجم به مگابایت
+MAX_DB_SIZE_MB = 50  # محدودیت حجم فایل دیتابیس
 
 def init_db():
     if os.path.exists(DB_PATH):
@@ -41,8 +40,6 @@ def init_db():
     conn.commit()
     return conn
 
-
-
 def fetch_channel_html(channel_username):
     url = f'https://t.me/s/{channel_username}'
     r = requests.get(url)
@@ -53,7 +50,6 @@ def fetch_channel_html(channel_username):
         return ""
 
 def extract_configs(html_text):
-    # استخراج کانفیگ‌های vmess و vless از متن HTML
     return re.findall(r'(vmess://[^\s<]+|vless://[^\s<]+)', html_text)
 
 def save_new_configs(conn, configs):
@@ -63,8 +59,8 @@ def save_new_configs(conn, configs):
         try:
             cur.execute("INSERT INTO configs (config, added_at) VALUES (?, ?)", (c, now))
         except sqlite3.IntegrityError:
-            # کانفیگ قبلا اضافه شده است، نادیده گرفته می‌شود
-            pass
+            pass  # کانفیگ تکراری
+
     conn.commit()
 
 def get_unsent_batch(conn, batch_size=5):
