@@ -86,7 +86,7 @@ def format_batch_message(batch):
         lines.append(f"{idx}️⃣\n{updated_config}\n")
     lines.append("</pre>")
     lines.append(f"\n<i>🕒 تاریخ ارسال: {datetime.now().strftime('%Y/%m/%d - %H:%M')}</i>")
-    lines.append("<br>")
+    # lines.append("<br>")  # حذف شد
     lines.append("#ZenoraVPN")
     return '\n'.join(lines)
 
