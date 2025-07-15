@@ -1,0 +1,6 @@
+CREATE TABLE IF NOT EXISTS configs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    config TEXT UNIQUE,
+    added_at DATETIME,
+    sent INTEGER DEFAULT 0
+);
