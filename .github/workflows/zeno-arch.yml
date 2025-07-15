@@ -38,6 +38,7 @@ jobs:
             tar -xzf ArchLinuxARM-aarch64-latest.tar.gz --strip-components=1
 
             ROOTFS_DIR=/rootfs-base
+            mkdir -p "$ROOTFS_DIR/etc"
 
             # تنظیم DNS داخل rootfs
             echo "nameserver 8.8.8.8" > "$ROOTFS_DIR/etc/resolv.conf"
