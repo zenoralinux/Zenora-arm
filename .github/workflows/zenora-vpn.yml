@@ -1,8 +1,10 @@
 name: Send V2Ray Configs to Telegram
 
+
 on:
   schedule:
-    - cron: '*/15 * * * *'  # هر ۱۵ دقیقه یک‌بار
+    - cron: '30 7 * * *'    # ساعت 07:30 UTC یعنی 11:00 تهران
+    - cron: '30 17 * * *'   # ساعت 17:30 UTC یعنی 21:00 تهران
   workflow_dispatch:
 
 jobs:
@@ -17,7 +19,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: configs.db
-          key: configs-db-cache-v1
+          key: configs-db-cache-v2   # کلید کش جدید برای جلوگیری از تداخل
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -30,8 +32,11 @@ jobs:
       - name: Run script
         run: python fetch_and_send.py
 
+      - name: Check DB file exists
+        run: ls -l configs.db || echo "configs.db not found"
+
       - name: Save updated DB
-        uses: actions/cache/save@v4
+        uses: actions/cache@v4
         with:
           path: configs.db
-          key: configs-db-cache-v1
+          key: configs-db-cache-v2
