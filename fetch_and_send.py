@@ -79,7 +79,7 @@ def replace_fragment(config, new_fragment):
         return f"{config}#{new_fragment}"
 
 def format_batch_message(batch):
-    new_fragment = "Ch:@zenoravpn" + "\u200B\u200B\u200B"
+    new_fragment = "Ch : @zenoravpn 💫📯"
     lines = ["<b>📦 ۵ کانفیگ جدید V2Ray | @ZenoraVPN</b>\n", "<pre>"]
     for idx, (_, config) in enumerate(batch, 1):
         updated_config = replace_fragment(config, new_fragment)
