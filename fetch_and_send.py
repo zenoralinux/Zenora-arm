@@ -2,6 +2,7 @@ import re
 import requests
 import html
 import sqlite3
+import os
 from datetime import datetime
 
 BOT_TOKEN = '7650919465:AAGDm2FtgRdjuEVclSlsEeUNaGgngcXMrCI'
@@ -10,6 +11,16 @@ DB_PATH = 'configs.db'
 channels = ['mrsoulb', 'Proxymaco']
 
 def init_db():
+    if os.path.exists(DB_PATH):
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            # تست سلامت فایل دیتابیس
+            conn.execute("SELECT name FROM sqlite_master LIMIT 1;")
+            return conn
+        except sqlite3.DatabaseError:
+            print("⚠️ فایل دیتابیس خراب است. حذف و ایجاد مجدد...")
+            os.remove(DB_PATH)
+
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute("""
@@ -26,9 +37,14 @@ def init_db():
 def fetch_channel_html(channel_username):
     url = f'https://t.me/s/{channel_username}'
     r = requests.get(url)
-    return r.text if r.status_code == 200 else ""
+    if r.status_code == 200:
+        return r.text
+    else:
+        print(f"⚠️ دریافت کانال @{channel_username} با خطا مواجه شد: {r.status_code}")
+        return ""
 
 def extract_configs(html_text):
+    # استخراج کانفیگ‌های vmess و vless از متن HTML
     return re.findall(r'(vmess://[^\s<]+|vless://[^\s<]+)', html_text)
 
 def save_new_configs(conn, configs):
@@ -38,6 +54,7 @@ def save_new_configs(conn, configs):
         try:
             cur.execute("INSERT INTO configs (config, added_at) VALUES (?, ?)", (c, now))
         except sqlite3.IntegrityError:
+            # کانفیگ قبلا اضافه شده است، نادیده گرفته می‌شود
             pass
     conn.commit()
 
@@ -70,7 +87,7 @@ def send_to_telegram(message):
     }
     r = requests.post(url, data=payload)
     if r.status_code != 200:
-        print(f"❌ Send failed: {r.text}")
+        print(f"❌ ارسال پیام با خطا مواجه شد: {r.text}")
         return False
     return True
 
@@ -84,15 +101,15 @@ def main():
 
     batch = get_unsent_batch(conn, 5)
     if not batch:
-        print("✅ No new configs to send.")
+        print("✅ هیچ کانفیگ جدیدی برای ارسال وجود ندارد.")
         return
 
     msg = format_batch_message(batch)
     if send_to_telegram(msg):
         mark_as_sent(conn, [row[0] for row in batch])
-        print("✅ Message sent and configs marked.")
+        print("✅ پیام ارسال و کانفیگ‌ها علامت‌گذاری شدند.")
     else:
-        print("❌ Failed to send message.")
+        print("❌ ارسال پیام ناموفق بود.")
 
     conn.close()
 
