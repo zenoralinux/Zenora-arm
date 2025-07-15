@@ -1,17 +1,23 @@
-name: Fetch Telegram V2Ray Configs
+name: Send V2Ray Configs to Telegram
 
 on:
   schedule:
-    - cron: '*/15 * * * *'  # هر ۱۵ دقیقه یکبار
+    - cron: '*/15 * * * *'  # هر ۱۵ دقیقه یک‌بار
   workflow_dispatch:
 
 jobs:
-  fetch-and-send:
+  send-configs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repo
         uses: actions/checkout@v4
+
+      - name: Restore SQLite cache
+        uses: actions/cache@v4
+        with:
+          path: configs.db
+          key: configs-db-cache-v1
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -19,9 +25,13 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: |
-          pip install requests beautifulsoup4
+        run: pip install requests
 
-      - name: Fetch configs and send to Telegram
-        run: |
-          python fetch_and_send.py
+      - name: Run script
+        run: python fetch_and_send.py
+
+      - name: Save updated DB
+        uses: actions/cache/save@v4
+        with:
+          path: configs.db
+          key: configs-db-cache-v1
