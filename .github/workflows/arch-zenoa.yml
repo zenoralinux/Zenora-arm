@@ -55,9 +55,8 @@ jobs:
             
             # ساخت rootfs
             pacstrap -G -M -C /etc/pacman.conf "$ROOTFS_DIR" \
-            base curl wget nano texinfo man-db man-pages zsh shadow bash \
-            coreutils file sed tar zstd pacman zenora-release zrepo/neofetch \
-            zenora-zsh-config zenora-fake-apt zenora-back sudo 
+            zenora-release zrepo/neofetch \
+            zenora-zsh-config zenora-fake-apt zenora-back 
 
             # فعال‌سازی locale و تنظیم زبان
             echo "en_US.UTF-8 UTF-8" >> "$ROOTFS_DIR"/etc/locale.gen
