@@ -3,8 +3,8 @@ import requests
 import sqlite3
 import os
 import base64
-from urllib.parse import urlparse, unquote
-from datetime import datetime, timedelta
+from urllib.parse import urlparse
+from datetime import datetime
 
 BOT_TOKEN = '7650919465:AAGDm2FtgRdjuEVclSlsEeUNaGgngcXMrCI'
 CHAT_ID = '@zenoravpn'
@@ -12,20 +12,20 @@ DB_PATH = 'configs.db'
 channels = ['mrsoulb', 'Proxymaco']
 MAX_DB_SIZE_MB = 50
 
-# ---------------- DB Init ----------------
+# ----------------- آماده‌سازی دیتابیس -----------------
 def init_db():
     if os.path.exists(DB_PATH):
         size_mb = os.path.getsize(DB_PATH) / (1024 * 1024)
         if size_mb > MAX_DB_SIZE_MB:
-            print("⚠️ حجم دیتابیس زیاد است. حذف شد.")
+            print("⚠️ دیتابیس بیش از ۵۰MB است. حذف شد.")
             os.remove(DB_PATH)
         else:
             try:
                 conn = sqlite3.connect(DB_PATH)
                 conn.execute("SELECT name FROM sqlite_master LIMIT 1;")
-                return conn
+                return ensure_schema(conn)
             except sqlite3.DatabaseError:
-                print("⚠️ دیتابیس خراب بود. حذف شد.")
+                print("⚠️ دیتابیس خراب است. حذف شد.")
                 os.remove(DB_PATH)
 
     conn = sqlite3.connect(DB_PATH)
@@ -41,7 +41,16 @@ def init_db():
     conn.commit()
     return conn
 
-# ---------------- کانفیگ آنالیز و کلید ----------------
+def ensure_schema(conn):
+    try:
+        cur = conn.cursor()
+        cur.execute("ALTER TABLE configs ADD COLUMN signature TEXT UNIQUE;")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # ستون وجود دارد
+    return conn
+
+# ----------------- پردازش کانفیگ‌ها -----------------
 def extract_key_info(config):
     if config.startswith("vless://") or config.startswith("vmess://"):
         proto = config.split("://")[0]
@@ -51,10 +60,9 @@ def extract_key_info(config):
                 payload = config.split("vmess://")[1]
                 padded = payload + '=' * (-len(payload) % 4)
                 decoded = base64.b64decode(padded).decode()
-                if decoded.strip().startswith('{'):
-                    import json
-                    data = json.loads(decoded)
-                    return f"{proto}|{data.get('add')}|{data.get('port')}|{data.get('id')}"
+                import json
+                data = json.loads(decoded)
+                return f"{proto}|{data.get('add')}|{data.get('port')}|{data.get('id')}"
             except Exception:
                 return None
 
@@ -69,7 +77,6 @@ def extract_key_info(config):
                 return None
     return None
 
-# ---------------- HTML آماده‌سازی ----------------
 def replace_fragment(config, new_fragment):
     base = config.split('#')[0]
     return f"{base}#{new_fragment}"
@@ -85,20 +92,19 @@ def format_batch_message(batch):
     lines.append("#ZenoraVPN")
     return '\n'.join(lines)
 
-# ---------------- دریافت کانال ----------------
+# ----------------- دریافت کانال و استخراج کانفیگ -----------------
 def fetch_channel_html(channel_username):
     url = f'https://t.me/s/{channel_username}'
     try:
         r = requests.get(url)
         return r.text if r.status_code == 200 else ""
-    except Exception as e:
-        print(f"❌ خطا در دریافت کانال @{channel_username}")
+    except Exception:
         return ""
 
 def extract_configs(html_text):
     return re.findall(r'(vmess://[^\s<]+|vless://[^\s<]+)', html_text)
 
-# ---------------- ذخیره‌سازی امن ----------------
+# ----------------- ذخیره‌سازی -----------------
 def save_new_configs(conn, configs):
     cur = conn.cursor()
     now = datetime.utcnow()
@@ -106,7 +112,10 @@ def save_new_configs(conn, configs):
         sig = extract_key_info(c)
         if sig:
             try:
-                cur.execute("INSERT INTO configs (config, signature, added_at) VALUES (?, ?, ?)", (c, sig, now))
+                cur.execute(
+                    "INSERT INTO configs (config, signature, added_at) VALUES (?, ?, ?)",
+                    (c, sig, now)
+                )
             except sqlite3.IntegrityError:
                 pass
     conn.commit()
@@ -116,7 +125,7 @@ def delete_old_configs(conn):
     cur.execute("DELETE FROM configs WHERE added_at < datetime('now', '-1 day')")
     conn.commit()
 
-# ---------------- پردازش ارسال ----------------
+# ----------------- مدیریت ارسال -----------------
 def get_unsent_batch(conn, batch_size=10):
     cur = conn.cursor()
     cur.execute("SELECT id, config FROM configs WHERE sent = 0 ORDER BY added_at ASC LIMIT ?", (batch_size,))
@@ -141,8 +150,15 @@ def send_to_telegram(message):
         return False
     return True
 
-# ---------------- main ----------------
+# ----------------- اجرا -----------------
 def main():
+    if os.path.exists(DB_PATH):
+        # پاک‌سازی فایل خراب یا ناقص
+        try:
+            sqlite3.connect(DB_PATH).execute("SELECT name FROM sqlite_master LIMIT 1;")
+        except sqlite3.DatabaseError:
+            os.remove(DB_PATH)
+
     conn = init_db()
     delete_old_configs(conn)
 
