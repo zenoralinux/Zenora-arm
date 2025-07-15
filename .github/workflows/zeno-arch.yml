@@ -35,7 +35,7 @@ jobs:
             mkdir -p /rootfs-base
             cd /rootfs-base
             curl -LO http://archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz
-            tar -xJf ArchLinuxARM-aarch64-latest.tar.gz --strip-components=1
+            tar -xzf ArchLinuxARM-aarch64-latest.tar.gz --strip-components=1
 
             ROOTFS_DIR=/rootfs-base
 
