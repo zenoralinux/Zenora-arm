@@ -9,11 +9,11 @@ CHAT_ID = '@zenoravpn'
 DB_PATH = 'configs.db'
 channels = ['mrsoulb', 'Proxymaco']
 
-MAX_DB_SIZE_MB = 50
+MAX_DB_SIZE_MB = 50  # محدودیت حجم فایل دیتابیس
 
 def init_db():
     if os.path.exists(DB_PATH):
-        size_mb = os.path.getsize(DB_PATH) / (1024*1024)
+        size_mb = os.path.getsize(DB_PATH) / (1024 * 1024)
         if size_mb > MAX_DB_SIZE_MB:
             print(f"⚠️ حجم فایل دیتابیس {size_mb:.2f} مگابایت است. حذف و ایجاد مجدد...")
             os.remove(DB_PATH)
@@ -29,12 +29,12 @@ def init_db():
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS configs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        config TEXT UNIQUE,
-        added_at DATETIME,
-        sent INTEGER DEFAULT 0
-    )
+        CREATE TABLE IF NOT EXISTS configs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            config TEXT UNIQUE,
+            added_at DATETIME,
+            sent INTEGER DEFAULT 0
+        )
     """)
     conn.commit()
     return conn
@@ -58,7 +58,7 @@ def save_new_configs(conn, configs):
         try:
             cur.execute("INSERT INTO configs (config, added_at) VALUES (?, ?)", (c, now))
         except sqlite3.IntegrityError:
-            pass
+            pass  # کانفیگ تکراری
     conn.commit()
 
 def get_unsent_batch(conn, batch_size=5):
@@ -80,12 +80,14 @@ def replace_fragment(config, new_fragment):
 
 def format_batch_message(batch):
     new_fragment = "Ch : @zenoravpn 💫📯"
-    lines = ["📦 ۵ کانفیگ جدید V2Ray | @ZenoraVPN\n", "<code>"]
+    lines = ["<b>📦 ۵ کانفیگ جدید V2Ray | @ZenoraVPN</b>\n"]
+    lines.append('<blockquote expandable>')  # باز کردن نقل‌قول جمع‌شونده
     for idx, (_, config) in enumerate(batch, 1):
         updated_config = replace_fragment(config, new_fragment)
-        lines.append(f"# {idx}\n{updated_config}\n")
-    lines.append("</code>")
-    lines.append(f"\n🕒 تاریخ: {datetime.now().strftime('%Y/%m/%d - %H:%M')}")
+        lines.append(f"{idx}️⃣\n{updated_config}\n")
+    lines.append('</blockquote>')
+    lines.append(f"\n<i>🕒 تاریخ ارسال: {datetime.now().strftime('%Y/%m/%d - %H:%M')}</i>")
+    lines.append("<br>")
     lines.append("#ZenoraVPN")
     return '\n'.join(lines)
 
