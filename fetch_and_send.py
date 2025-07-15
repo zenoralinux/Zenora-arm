@@ -74,12 +74,16 @@ def mark_as_sent(conn, ids):
     conn.commit()
 
 def format_batch_message(batch, base_index=1):
-    lines = ["📦 <b>۵ کانفیگ جدید V2Ray</b> | <b>@ZenoraVPN</b>\n"]
+    lines = ["📦 ۵ کانفیگ جدید V2Ray | @ZenoraVPN\n"]
     for idx, (_, config) in enumerate(batch):
-        tag = f"Config #{base_index + idx}"
-        title = f"🔐 <b>{'VMESS' if config.startswith('vmess') else 'VLESS'} - {tag}</b>"
-        lines.append(f"{title}\n<code>{html.escape(config)}</code>\n")
-    lines.append(f"🕒 تاریخ: {datetime.now().strftime('%Y/%m/%d - %H:%M')}\n#ZenoraVPN")
+        # استخراج نام اختصاصی از fragment کانفیگ (قسمت بعد از #)
+        name = "Config"
+        if '#' in config:
+            frag = config.split('#')[-1]
+            name = frag.strip()
+        lines.append(f"{config}\n")
+    lines.append(f"🕒 تاریخ: {datetime.now().strftime('%Y/%m/%d - %H:%M')}")
+    lines.append("#ZenoraVPN")
     return '\n'.join(lines)
 
 def send_to_telegram(message):
