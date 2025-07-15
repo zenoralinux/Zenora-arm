@@ -1,0 +1,112 @@
+name: zenora ARM64 AUR Repository Builder
+  
+on: 
+  push:
+    branches: [ main ]
+  schedule:
+    - cron: '0 3 * * *'  # اجرای روزانه ساعت 03:00 UTC
+
+permissions:
+  contents: write
+
+jobs:
+  build-arm64:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Enable QEMU for aarch64
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: all
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build ARM64 RootFS in container
+        uses: addnab/docker-run-action@v3
+        with:
+          image: ghcr.io/fwcd/archlinux:latest
+          options: --platform linux/arm64 --privileged -v ${{ github.workspace }}:/output
+          shell: bash
+          run: |
+            set -eux
+
+            pacman -Syu --noconfirm --needed arch-install-scripts pacman-contrib wget curl base-devel nano texinfo man-db man-pages zsh shadow bash coreutils file sed tar zstd pacman sudo
+
+            ROOTFS_DIR=~/zenora-rootfs
+            mkdir -p "$ROOTFS_DIR"
+            
+            cd "$ROOTFS_DIR"
+            wget http://archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz
+            tar -xvf ArchLinuxARM-aarch64-latest.tar.gz
+            rm ArchLinuxARM-aarch64-latest.tar.gz 
+            cd ..
+            
+            # مخازن اختصاصی zenora
+            sed -i '/^\[core\]/i\
+            [zrepo]\
+            SigLevel = Never\
+            Server = https://codeberg.org/zenoralinux/zenora-repo/raw/branch/main/$arch' /etc/pacman.conf
+
+            sed -i '/^\[core\]/i\
+            [zc-repo]\
+            SigLevel = Never\
+            Server = https://codeberg.org/zenoralinux/zc-repo/raw/branch/main/zcrepo/$arch' /etc/pacman.conf
+            
+            # ساخت rootfs
+            pacstrap -G -M -C /etc/pacman.conf "$ROOTFS_DIR" \
+            base curl wget nano texinfo man-db man-pages zsh shadow bash \
+            coreutils file sed tar zstd pacman zenora-release zrepo/neofetch \
+            zenora-zsh-config zenora-fake-apt zenora-back sudo 
+
+            # فعال‌سازی locale و تنظیم زبان
+            echo "en_US.UTF-8 UTF-8" >> "$ROOTFS_DIR"/etc/locale.gen
+            arch-chroot "$ROOTFS_DIR" locale-gen
+            echo 'LANG=en_US.UTF-8' > "$ROOTFS_DIR"/etc/locale.conf
+
+            # DNS و hostname و hosts
+            echo "nameserver 8.8.8.8" > "$ROOTFS_DIR"/etc/resolv.conf
+            echo "localhost" > "$ROOTFS_DIR"/etc/hostname
+            echo "127.0.0.1 localhost" > "$ROOTFS_DIR"/etc/hosts
+
+            # جلوگیری از خطای landlock
+            echo "PACMAN_IGNORE_LANDLOCK=1" >> "$ROOTFS_DIR"/etc/environment
+            echo "export PACMAN_IGNORE_LANDLOCK=1" >> "$ROOTFS_DIR"/etc/profile
+
+            # symlink برای /bin/sh
+            ln -sf /bin/bash "$ROOTFS_DIR"/bin/sh
+
+            # ساخت یوزر zenora
+            echo "zenora:x:1000:1000::/home/zenora:/bin/zsh" >> "$ROOTFS_DIR"/etc/passwd
+            echo "zenora:x:1000:wheel" >> "$ROOTFS_DIR"/etc/group
+            echo "zenora ALL=(ALL) NOPASSWD: ALL" >> "$ROOTFS_DIR"/etc/sudoers
+
+            mkdir -p "$ROOTFS_DIR"/home/zenora
+            touch "$ROOTFS_DIR"/home/zenora/.zshrc
+            touch "$ROOTFS_DIR"/home/zenora/.zprofile
+            chown -R 1000:1000 "$ROOTFS_DIR"/home/zenora
+
+            # کپی pacman.conf نهایی
+            cp /etc/pacman.conf "$ROOTFS_DIR"/etc/pacman.conf
+
+            # حذف کش برای کاهش حجم
+            rm -rf "$ROOTFS_DIR"/var/cache/pacman/pkg/*
+
+            # بسته‌بندی rootfs
+            tar --hard-dereference --numeric-owner --preserve-permissions -czf /output/zenroalinux-arm64-rootfs.tar.gz -C "$ROOTFS_DIR" .
+
+            ls -lh /output/zenroalinux-arm64-rootfs.tar.gz
+
+      - name: Set release tag
+        id: tag
+        run: echo "tag_name=arm64-rootfs-$(date +'%Y-%m-%d')" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release in `zenora-android`
+        uses: softprops/action-gh-release@v2
+        with:
+          repository: zenoralinux/zenora-android
+          tag_name: ${{ steps.tag.outputs.tag_name }}
+          name: Zenora ARM64 RootFS ${{ steps.tag.outputs.tag_name }}
+          files: ${{ github.workspace }}/zenroalinux-arm64-rootfs.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.ZENORA_ANDROID_PAT }}
