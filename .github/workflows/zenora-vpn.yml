@@ -1,0 +1,27 @@
+name: Fetch Telegram V2Ray Configs
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'  # هر ۱۵ دقیقه یکبار
+  workflow_dispatch:
+
+jobs:
+  fetch-and-send:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install requests beautifulsoup4
+
+      - name: Fetch configs and send to Telegram
+        run: |
+          python fetch_and_send.py
