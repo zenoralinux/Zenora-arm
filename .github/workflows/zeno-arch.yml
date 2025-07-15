@@ -37,8 +37,9 @@ jobs:
             curl -LO http://archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz
             tar -xzf ArchLinuxARM-aarch64-latest.tar.gz --strip-components=1
 
-            ROOTFS_DIR=/rootfs-base
-            
+            ROOTFS_DIR=/rootfs-base/root
+            ls /rootfs-base
+
             touch "$ROOTFS_DIR/etc/resolv.conf"
             echo "nameserver 8.8.8.8" > "$ROOTFS_DIR/etc/resolv.conf"
 
