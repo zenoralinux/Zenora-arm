@@ -8,14 +8,13 @@ BOT_TOKEN = '7650919465:AAGDm2FtgRdjuEVclSlsEeUNaGgngcXMrCI'
 CHAT_ID = '@zenoravpn'
 DB_PATH = 'configs.db'
 channels = ['mrsoulb', 'Proxymaco']
-
-MAX_DB_SIZE_MB = 50  # محدودیت حجم فایل دیتابیس
+MAX_DB_SIZE_MB = 50  # حداکثر حجم دیتابیس
 
 def init_db():
     if os.path.exists(DB_PATH):
         size_mb = os.path.getsize(DB_PATH) / (1024*1024)
         if size_mb > MAX_DB_SIZE_MB:
-            print(f"⚠️ حجم فایل دیتابیس {size_mb:.2f} مگابایت است. حذف و ایجاد مجدد...")
+            print(f"⚠️ دیتابیس {size_mb:.2f}MB است. حذف شد.")
             os.remove(DB_PATH)
         else:
             try:
@@ -23,7 +22,7 @@ def init_db():
                 conn.execute("SELECT name FROM sqlite_master LIMIT 1;")
                 return conn
             except sqlite3.DatabaseError:
-                print("⚠️ فایل دیتابیس خراب است. حذف و ایجاد مجدد...")
+                print("⚠️ دیتابیس خراب است. حذف شد.")
                 os.remove(DB_PATH)
 
     conn = sqlite3.connect(DB_PATH)
@@ -44,24 +43,27 @@ def fetch_channel_html(channel_username):
     r = requests.get(url)
     if r.status_code == 200:
         return r.text
-    else:
-        print(f"⚠️ دریافت کانال @{channel_username} با خطا مواجه شد: {r.status_code}")
-        return ""
+    print(f"⚠️ خطا در دریافت @{channel_username}: {r.status_code}")
+    return ""
 
 def extract_configs(html_text):
     return re.findall(r'(vmess://[^\s<]+|vless://[^\s<]+)', html_text)
+
+def clean_config(config):
+    return config.split('#')[0]
 
 def save_new_configs(conn, configs):
     cur = conn.cursor()
     now = datetime.utcnow()
     for c in configs:
+        clean = clean_config(c)
         try:
-            cur.execute("INSERT INTO configs (config, added_at) VALUES (?, ?)", (c, now))
+            cur.execute("INSERT INTO configs (config, added_at) VALUES (?, ?)", (clean, now))
         except sqlite3.IntegrityError:
             pass
     conn.commit()
 
-def get_unsent_batch(conn, batch_size=5):
+def get_unsent_batch(conn, batch_size=10):
     cur = conn.cursor()
     cur.execute("SELECT id, config FROM configs WHERE sent = 0 ORDER BY added_at ASC LIMIT ?", (batch_size,))
     return cur.fetchall()
@@ -72,21 +74,17 @@ def mark_as_sent(conn, ids):
     conn.commit()
 
 def replace_fragment(config, new_fragment):
-    if '#' in config:
-        base = config.split('#')[0]
-        return f"{base}#{new_fragment}"
-    else:
-        return f"{config}#{new_fragment}"
+    base = config.split('#')[0]
+    return f"{base}#{new_fragment}"
 
 def format_batch_message(batch):
     new_fragment = "Ch : @zenoravpn 💫📯"
-    lines = ["<b>📦 ۵ کانفیگ جدید V2Ray | @ZenoraVPN</b>\n", "<pre>"]
-    for idx, (_, config) in enumerate(batch, 1):
+    lines = ["<b>📦 ۱۰ کانفیگ جدید V2Ray | @ZenoraVPN</b>\n", "<pre>"]
+    for _, config in batch:
         updated_config = replace_fragment(config, new_fragment)
-        lines.append(f"{idx}️⃣\n{updated_config}\n")
+        lines.append(f"{updated_config}")
     lines.append("</pre>")
-    lines.append(f"\n<i>🕒 تاریخ ارسال: {datetime.now().strftime('%Y/%m/%d - %H:%M')}</i>")
-    # lines.append("<br>")  # حذف شد
+    lines.append(f"\n<i>🕒 تاریخ: {datetime.now().strftime('%Y/%m/%d - %H:%M')}</i>")
     lines.append("#ZenoraVPN")
     return '\n'.join(lines)
 
@@ -100,7 +98,7 @@ def send_to_telegram(message):
     }
     r = requests.post(url, data=payload)
     if r.status_code != 200:
-        print(f"❌ ارسال پیام با خطا مواجه شد: {r.text}")
+        print(f"❌ ارسال پیام ناموفق: {r.text}")
         return False
     return True
 
@@ -111,7 +109,7 @@ def main():
         new_configs = extract_configs(html_text)
         save_new_configs(conn, new_configs)
 
-    batch = get_unsent_batch(conn, 5)
+    batch = get_unsent_batch(conn, 10)
     if not batch:
         print("✅ هیچ کانفیگ جدیدی برای ارسال وجود ندارد.")
         return
@@ -119,9 +117,9 @@ def main():
     msg = format_batch_message(batch)
     if send_to_telegram(msg):
         mark_as_sent(conn, [row[0] for row in batch])
-        print("✅ پیام ارسال و کانفیگ‌ها علامت‌گذاری شدند.")
+        print("✅ پیام ارسال شد و کانفیگ‌ها علامت‌گذاری شدند.")
     else:
-        print("❌ ارسال پیام ناموفق بود.")
+        print("❌ ارسال پیام شکست خورد.")
 
     conn.close()
 
