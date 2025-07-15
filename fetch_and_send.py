@@ -1,7 +1,6 @@
 import re
 import requests
 import html
-import time
 import sqlite3
 from datetime import datetime
 
@@ -42,7 +41,7 @@ def save_new_configs(conn, configs):
             pass
     conn.commit()
 
-def get_unsent_batches(conn, batch_size=5):
+def get_unsent_batch(conn, batch_size=5):
     cur = conn.cursor()
     cur.execute("SELECT id, config FROM configs WHERE sent = 0 ORDER BY added_at ASC LIMIT ?", (batch_size,))
     return cur.fetchall()
@@ -56,10 +55,7 @@ def format_batch_message(batch, base_index=1):
     lines = ["📦 <b>۵ کانفیگ جدید V2Ray</b> | <b>@ZenoraVPN</b>\n"]
     for idx, (_, config) in enumerate(batch):
         tag = f"Config #{base_index + idx}"
-        if config.startswith("vmess://"):
-            title = f"🔐 <b>VMESS - {tag}</b>"
-        else:
-            title = f"🔐 <b>VLESS - {tag}</b>"
+        title = f"🔐 <b>{'VMESS' if config.startswith('vmess') else 'VLESS'} - {tag}</b>"
         lines.append(f"{title}\n<code>{html.escape(config)}</code>\n")
     lines.append(f"🕒 تاریخ: {datetime.now().strftime('%Y/%m/%d - %H:%M')}\n#ZenoraVPN")
     return '\n'.join(lines)
@@ -81,30 +77,22 @@ def send_to_telegram(message):
 def main():
     conn = init_db()
 
-    # Step 1: Fetch configs from channels
     for channel in channels:
         html_text = fetch_channel_html(channel)
         new_configs = extract_configs(html_text)
         save_new_configs(conn, new_configs)
 
-    # Step 2: Loop and send unsent batches every 15 minutes
-    index = 0
-    while True:
-        batch = get_unsent_batches(conn, 5)
-        if not batch:
-            print("✅ All configs sent.")
-            break
+    batch = get_unsent_batch(conn, 5)
+    if not batch:
+        print("✅ No new configs to send.")
+        return
 
-        msg = format_batch_message(batch, base_index=index*5 + 1)
-        if send_to_telegram(msg):
-            mark_as_sent(conn, [row[0] for row in batch])
-            index += 1
-            if get_unsent_batches(conn, 1):  # اگر هنوز هست برای دفعه بعد
-                print("⏳ Waiting 15 minutes...")
-                time.sleep(900)  # 15 minutes
-        else:
-            print("❌ Failed to send. Exiting.")
-            break
+    msg = format_batch_message(batch)
+    if send_to_telegram(msg):
+        mark_as_sent(conn, [row[0] for row in batch])
+        print("✅ Message sent and configs marked.")
+    else:
+        print("❌ Failed to send message.")
 
     conn.close()
 
