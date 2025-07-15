@@ -2,7 +2,7 @@ name: zenora ARM64 AUR Repository Builder
   
 on: 
   push:
-    branches: [ main ]
+    branches: [ main ] 
   schedule:
     - cron: '0 3 * * *'  # اجرای روزانه ساعت 03:00 UTC
 
