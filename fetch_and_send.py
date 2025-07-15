@@ -10,16 +10,23 @@ CHAT_ID = '@zenoravpn'
 DB_PATH = 'configs.db'
 channels = ['mrsoulb', 'Proxymaco']
 
+
+MAX_DB_SIZE_MB = 50  # محدودیت حجم به مگابایت
+
 def init_db():
     if os.path.exists(DB_PATH):
-        try:
-            conn = sqlite3.connect(DB_PATH)
-            # تست سلامت فایل دیتابیس
-            conn.execute("SELECT name FROM sqlite_master LIMIT 1;")
-            return conn
-        except sqlite3.DatabaseError:
-            print("⚠️ فایل دیتابیس خراب است. حذف و ایجاد مجدد...")
+        size_mb = os.path.getsize(DB_PATH) / (1024 * 1024)
+        if size_mb > MAX_DB_SIZE_MB:
+            print(f"⚠️ حجم فایل دیتابیس {size_mb:.2f} مگابایت است. حذف و ایجاد مجدد...")
             os.remove(DB_PATH)
+        else:
+            try:
+                conn = sqlite3.connect(DB_PATH)
+                conn.execute("SELECT name FROM sqlite_master LIMIT 1;")
+                return conn
+            except sqlite3.DatabaseError:
+                print("⚠️ فایل دیتابیس خراب است. حذف و ایجاد مجدد...")
+                os.remove(DB_PATH)
 
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
@@ -33,6 +40,8 @@ def init_db():
     """)
     conn.commit()
     return conn
+
+
 
 def fetch_channel_html(channel_username):
     url = f'https://t.me/s/{channel_username}'
