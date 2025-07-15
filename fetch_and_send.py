@@ -1,6 +1,5 @@
 import re
 import requests
-import html
 import sqlite3
 import os
 from datetime import datetime
@@ -60,7 +59,6 @@ def save_new_configs(conn, configs):
             cur.execute("INSERT INTO configs (config, added_at) VALUES (?, ?)", (c, now))
         except sqlite3.IntegrityError:
             pass  # کانفیگ تکراری
-
     conn.commit()
 
 def get_unsent_batch(conn, batch_size=5):
@@ -73,16 +71,22 @@ def mark_as_sent(conn, ids):
     cur.executemany("UPDATE configs SET sent = 1 WHERE id = ?", [(i,) for i in ids])
     conn.commit()
 
+def replace_fragment(config, new_fragment):
+    if '#' in config:
+        base = config.split('#')[0]
+        return f"{base}#{new_fragment}"
+    else:
+        return f"{config}#{new_fragment}"
+
 def format_batch_message(batch, base_index=1):
+    new_fragment = "Ch : @zenoravpn 💫📯"
     lines = ["📦 ۵ کانفیگ جدید V2Ray | @ZenoraVPN\n"]
+    lines.append("<code>")  # باز کردن بلاک کد HTML
     for idx, (_, config) in enumerate(batch):
-        # استخراج نام اختصاصی از fragment کانفیگ (قسمت بعد از #)
-        name = "Config"
-        if '#' in config:
-            frag = config.split('#')[-1]
-            name = frag.strip()
-        lines.append(f"{config}\n")
-    lines.append(f"🕒 تاریخ: {datetime.now().strftime('%Y/%m/%d - %H:%M')}")
+        updated_config = replace_fragment(config, new_fragment)
+        lines.append(updated_config)
+    lines.append("</code>")
+    lines.append(f"\n🕒 تاریخ: {datetime.now().strftime('%Y/%m/%d - %H:%M')}")
     lines.append("#ZenoraVPN")
     return '\n'.join(lines)
 
