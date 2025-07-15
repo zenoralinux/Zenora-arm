@@ -31,36 +31,27 @@ jobs:
           run: |
             set -eux
 
-            # دریافت rootfs رسمی Arch برای proot-distro
+            # دریافت rootfs رسمی Arch
             mkdir -p /rootfs-base
             cd /rootfs-base
             curl -LO http://archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz
             tar -xzf ArchLinuxARM-aarch64-latest.tar.gz --strip-components=1
 
-            ROOTFS_DIR=/rootfs-base/root
-            ls /rootfs-base
+            ROOTFS_DIR=/rootfs-base
 
-            touch "$ROOTFS_DIR/etc/resolv.conf"
+            # تنظیم DNS داخل rootfs
             echo "nameserver 8.8.8.8" > "$ROOTFS_DIR/etc/resolv.conf"
 
-            # مخازن اختصاصی zenora
-            sed -i '/^\[core\]/i\
-            [zrepo]\
-            SigLevel = Never\
-            Server = https://codeberg.org/zenoralinux/zenora-repo/raw/branch/main/$arch' /etc/pacman.conf
+            # افزودن مخازن zenora
+            echo -e "[zrepo]\nSigLevel = Never\nServer = https://codeberg.org/zenoralinux/zenora-repo/raw/branch/main/\$arch" >> "$ROOTFS_DIR/etc/pacman.conf"
+            echo -e "[zc-repo]\nSigLevel = Never\nServer = https://codeberg.org/zenoralinux/zc-repo/raw/branch/main/zcrepo/\$arch" >> "$ROOTFS_DIR/etc/pacman.conf"
 
-            sed -i '/^\[core\]/i\
-            [zc-repo]\
-            SigLevel = Never\
-            Server = https://codeberg.org/zenoralinux/zc-repo/raw/branch/main/zcrepo/$arch' /etc/pacman.conf
-
-            # آپدیت و نصب بسته‌ها در داخل rootfs با chroot
+            # mount فایل‌سیستم‌ها برای chroot
             mount --bind /dev "$ROOTFS_DIR/dev"
             mount --bind /proc "$ROOTFS_DIR/proc"
             mount --bind /sys "$ROOTFS_DIR/sys"
 
-
-
+            # به‌روزرسانی و نصب بسته‌ها
             chroot "$ROOTFS_DIR" pacman -Syu --noconfirm
             chroot "$ROOTFS_DIR" pacman -S --noconfirm \
               base curl wget nano texinfo man-db man-pages zsh shadow bash \
@@ -77,8 +68,7 @@ jobs:
             chroot "$ROOTFS_DIR" locale-gen
             echo 'LANG=en_US.UTF-8' > "$ROOTFS_DIR/etc/locale.conf"
 
-            # DNS و hostname
-            echo "nameserver 8.8.8.8" > "$ROOTFS_DIR/etc/resolv.conf"
+            # hostname و hosts
             echo "localhost" > "$ROOTFS_DIR/etc/hostname"
             echo "127.0.0.1 localhost" > "$ROOTFS_DIR/etc/hosts"
 
@@ -99,7 +89,7 @@ jobs:
             # symlink برای /bin/sh
             ln -sf /bin/bash "$ROOTFS_DIR/bin/sh"
 
-            # ساخت کاربر zenora با zsh و sudo بدون پسورد
+            # ساخت یوزر zenora
             echo "zenora:x:1000:1000::/home/zenora:/bin/zsh" >> "$ROOTFS_DIR/etc/passwd"
             echo "zenora:x:1000:" >> "$ROOTFS_DIR/etc/group"
             echo "zenora ALL=(ALL) NOPASSWD: ALL" >> "$ROOTFS_DIR/etc/sudoers"
@@ -107,10 +97,10 @@ jobs:
             touch "$ROOTFS_DIR/home/zenora/.zshrc"
             chown -R 1000:1000 "$ROOTFS_DIR/home/zenora"
 
-            # حذف کش
+            # پاکسازی کش pacman
             rm -rf "$ROOTFS_DIR/var/cache/pacman/pkg"/* || true
 
-            # ساخت فایل tar.gz نهایی
+            # بسته‌بندی نهایی rootfs
             tar --hard-dereference --numeric-owner --preserve-permissions -czf /output/zenroalinux-arm64-rootfs.tar.gz -C "$ROOTFS_DIR" .
 
             ls -lh /output/zenroalinux-arm64-rootfs.tar.gz
