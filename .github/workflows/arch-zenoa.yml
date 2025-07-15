@@ -64,11 +64,11 @@ jobs:
             echo 'LANG=en_US.UTF-8' > "$ROOTFS_DIR"/etc/locale.conf
 
             # DNS و hostname و hosts\
-            mkdir -p "$ROOTFS_DIR"/etc/
-            touch "$ROOTFS_DIR"/etc/resolv.conf
-            echo "nameserver 8.8.8.8" > "$ROOTFS_DIR"/etc/resolv.conf
-            echo "localhost" > "$ROOTFS_DIR"/etc/hostname
-            echo "127.0.0.1 localhost" > "$ROOTFS_DIR"/etc/hosts
+            # mkdir -p "$ROOTFS_DIR"/etc/
+            # touch "$ROOTFS_DIR"/etc/resolv.conf
+            # echo "nameserver 8.8.8.8" > "$ROOTFS_DIR"/etc/resolv.conf
+            # echo "localhost" > "$ROOTFS_DIR"/etc/hostname
+            # echo "127.0.0.1 localhost" > "$ROOTFS_DIR"/etc/hosts
 
             # جلوگیری از خطای landlock
             echo "PACMAN_IGNORE_LANDLOCK=1" >> "$ROOTFS_DIR"/etc/environment
