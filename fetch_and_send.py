@@ -4,7 +4,7 @@ from datetime import datetime
 
 BOT_TOKEN = '7650919465:AAGDm2FtgRdjuEVclSlsEeUNaGgngcXMrCI'
 CHAT_ID = '@zenoravpn'
-channels = ['mrsoulb', 'Proxymaco']
+channels = [  "@Alpha_V2ray_Iran","@proxystore11","@WarV2Ray","@Farah_VPN","@iMTProto","@DALTON_PING","@anty_filter","@PASARGAD_V2rayNG","@xixv2ray"]
 
 def fetch_channel_html(channel_username):
     url = f'https://t.me/s/{channel_username}'
