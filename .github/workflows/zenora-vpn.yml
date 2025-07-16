@@ -2,7 +2,7 @@ name: Send V2Ray Configs to Telegram
 
 on:
   schedule:
-  - cron: '30 0,7,14,21 * * *'
+  - cron: '0 */4 * * *'
 
   workflow_dispatch:
 
