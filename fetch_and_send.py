@@ -32,12 +32,10 @@ def hash_config(config):
     return hashlib.sha256(config.encode()).hexdigest()
 
 def clean_and_tag_config(config):
-    # حذف تگ‌های قدیمی و اضافه کردن تگ ثابت
     config = re.sub(r'#.*', '', config)
     return config + '#Ch : @zenoravpn 💫📯'
 
 def escape_markdown(text):
-    # escape کاراکترهای خاص markdown v2
     escape_chars = r'\_*[]()~`>#+-=|{}.!'
     for ch in escape_chars:
         text = text.replace(ch, '\\' + ch)
@@ -47,7 +45,6 @@ def format_batch_message(batch):
     lines = ["📦 ۵ کانفیگ جدید V2Ray | @ZenoraVPN\n"]
     for config in batch:
         escaped = escape_markdown(config)
-        # هر خط با > برای نقل‌قول
         lines.append('>' + escaped)
     lines.append(f"\n🕒 تاریخ: {escape_markdown(datetime.now().strftime('%Y/%m/%d - %H:%M'))}")
     lines.append("#ZenoraVPN")
@@ -62,6 +59,8 @@ def send_to_telegram(message):
         'disable_web_page_preview': True
     }
     r = requests.post(url, data=payload)
+    print(f"Telegram response status: {r.status_code}")
+    print(f"Telegram response text: {r.text}")
     if r.status_code != 200:
         print(f"❌ Failed to send message: {r.text}")
     else:
