@@ -1,9 +1,8 @@
 import requests
 import re
-import html
 import time
 import hashlib
-from datetime import datetime, timedelta
+from datetime import datetime
 
 BOT_TOKEN = '7650919465:AAGDm2FtgRdjuEVclSlsEeUNaGgngcXMrCI'
 CHAT_ID = '@zenoravpn'
@@ -27,27 +26,31 @@ def fetch_channel_html(channel_username):
     return r.text if r.status_code == 200 else ""
 
 def extract_recent_configs(html_text):
-    # استخراج لینک‌های vless/vmess از HTML
     return re.findall(r'(vmess://[^\s<]+|vless://[^\s<]+)', html_text)
 
 def hash_config(config):
     return hashlib.sha256(config.encode()).hexdigest()
 
 def clean_and_tag_config(config):
-    # حذف تگ‌های قبلی و افزودن تگ جدید (برای یکسان‌سازی)
+    # حذف تگ‌های قدیمی و اضافه کردن تگ ثابت
     config = re.sub(r'#.*', '', config)
     return config + '#Ch : @zenoravpn 💫📯'
 
-def format_batch_message(batch, base_index=1):
-    lines = ["📦 <b>۵ کانفیگ جدید V2Ray</b> | <b>@ZenoraVPN</b>\n"]
-    for idx, config in enumerate(batch):
-        tag = f"Config #{base_index + idx}"
-        if config.startswith("vmess://"):
-            title = f"🔐 <b>VMESS - {tag}</b>"
-        else:
-            title = f"🔐 <b>VLESS - {tag}</b>"
-        lines.append(f"{title}\n<code>{html.escape(config)}</code>\n")
-    lines.append(f"🕒 تاریخ: {datetime.now().strftime('%Y/%m/%d - %H:%M')}\n#ZenoraVPN")
+def escape_markdown(text):
+    # escape کاراکترهای خاص markdown v2
+    escape_chars = r'\_*[]()~`>#+-=|{}.!'
+    for ch in escape_chars:
+        text = text.replace(ch, '\\' + ch)
+    return text
+
+def format_batch_message(batch):
+    lines = ["📦 ۵ کانفیگ جدید V2Ray | @ZenoraVPN\n"]
+    for config in batch:
+        escaped = escape_markdown(config)
+        # هر خط با > برای نقل‌قول
+        lines.append('>' + escaped)
+    lines.append(f"\n🕒 تاریخ: {escape_markdown(datetime.now().strftime('%Y/%m/%d - %H:%M'))}")
+    lines.append("#ZenoraVPN")
     return '\n'.join(lines)
 
 def send_to_telegram(message):
@@ -55,7 +58,7 @@ def send_to_telegram(message):
     payload = {
         'chat_id': CHAT_ID,
         'text': message,
-        'parse_mode': 'HTML',
+        'parse_mode': 'MarkdownV2',
         'disable_web_page_preview': True
     }
     r = requests.post(url, data=payload)
@@ -83,13 +86,14 @@ def main():
 
     print(f"✅ Found {len(all_new_configs)} new configs.")
     for i, batch in enumerate(batches):
-        msg = format_batch_message(batch, base_index=i*5 + 1)
+        msg = format_batch_message(batch)
         send_to_telegram(msg)
         if i < len(batches) - 1:
             print("⏳ Waiting 15 minutes for next batch...")
             time.sleep(900)
 
     save_seen(new_seen)
+    print("✅ Done. Waiting for next scheduled run.")
 
 if __name__ == '__main__':
     main()
