@@ -1,154 +1,94 @@
-import re
 import requests
-import sqlite3
-import os
-import base64
-from urllib.parse import urlparse
-from datetime import datetime
-import json
+import re
+import html
+import time
+from datetime import datetime, timedelta
 
 BOT_TOKEN = '7650919465:AAGDm2FtgRdjuEVclSlsEeUNaGgngcXMrCI'
 CHAT_ID = '@zenoravpn'
-CHANNELS = ['mrsoulb', 'Proxymaco']
-DB_PATH = 'configs.db'
-MAX_DB_SIZE_MB = 50
-FRAGMENT_NAME = "Ch : @zenoravpn 💫📯"
+SEEN_FILE = 'sent_configs.txt'
 
-def init_db():
-    if os.path.exists(DB_PATH):
-        try:
-            size = os.path.getsize(DB_PATH) / (1024 * 1024)
-            if size > MAX_DB_SIZE_MB:
-                os.remove(DB_PATH)
-            else:
-                conn = sqlite3.connect(DB_PATH)
-                conn.execute("SELECT name FROM sqlite_master LIMIT 1;")
-                ensure_signature_column(conn)
-                return conn
-        except Exception:
-            os.remove(DB_PATH)
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("""
-        CREATE TABLE configs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            config TEXT,
-            signature TEXT UNIQUE,
-            added_at DATETIME,
-            sent INTEGER DEFAULT 0
-        )
-    """)
-    conn.commit()
-    return conn
+channels = ['mrsoulb', 'Proxymaco']
 
-def ensure_signature_column(conn):
-    cur = conn.cursor()
+def load_seen():
     try:
-        cur.execute("PRAGMA table_info(configs);")
-        cols = [row[1] for row in cur.fetchall()]
-        if 'signature' not in cols:
-            cur.execute("ALTER TABLE configs ADD COLUMN signature TEXT UNIQUE")
-            conn.commit()
-    except:
-        pass
+        with open(SEEN_FILE, 'r') as f:
+            return set(f.read().splitlines())
+    except FileNotFoundError:
+        return set()
 
-def extract_key_info(config):
-    if config.startswith("vmess://"):
-        try:
-            payload = config.split("vmess://")[1]
-            padded = payload + '=' * (-len(payload) % 4)
-            decoded = base64.b64decode(padded).decode()
-            data = json.loads(decoded)
-            return f"vmess|{data.get('add')}|{data.get('port')}|{data.get('id')}"
-        except Exception:
-            return None
-    elif config.startswith("vless://"):
-        try:
-            url = urlparse(config)
-            return f"vless|{url.hostname}|{url.port}|{url.username}"
-        except Exception:
-            return None
-    return None
+def save_seen(seen):
+    with open(SEEN_FILE, 'w') as f:
+        f.write('\n'.join(seen))
 
-def fetch_channel_html(channel):
-    try:
-        url = f"https://t.me/s/{channel}"
-        r = requests.get(url)
-        return r.text if r.status_code == 200 else ""
-    except:
-        return ""
+def fetch_channel_html(channel_username):
+    url = f'https://t.me/s/{channel_username}'
+    r = requests.get(url)
+    return r.text if r.status_code == 200 else ""
 
-def extract_configs(text):
-    return re.findall(r'(vmess://[^\s<]+|vless://[^\s<]+)', text)
-
-def save_new_configs(conn, configs):
-    cur = conn.cursor()
+def extract_recent_configs(html_text):
+    recent_configs = []
     now = datetime.utcnow()
-    for cfg in configs:
-        sig = extract_key_info(cfg)
-        if sig:
-            try:
-                cur.execute(
-                    "INSERT INTO configs (config, signature, added_at) VALUES (?, ?, ?)",
-                    (cfg, sig, now)
-                )
-            except sqlite3.IntegrityError:
-                pass
-    conn.commit()
+    yesterday = now - timedelta(hours=24)
 
-def delete_old_configs(conn):
-    cur = conn.cursor()
-    cur.execute("DELETE FROM configs WHERE added_at < datetime('now', '-1 day')")
-    conn.commit()
+    # تاریخ‌ها در HTML کانال نیستند. پس اگر scraping ساده می‌کنی، فرض کن همه اخیرند.
+    # اگر از Telethon استفاده شود، می‌توان زمان دقیق داشت.
+    configs = re.findall(r'(vmess://[^\s<]+|vless://[^\s<]+)', html_text)
+    return configs
 
-def get_unsent_batch(conn, batch_size=10):
-    cur = conn.cursor()
-    cur.execute("SELECT id, config FROM configs WHERE sent = 0 ORDER BY added_at ASC LIMIT ?", (batch_size,))
-    return cur.fetchall()
+def format_batch_message(batch, base_index=1):
+    lines = ["📦 <b>۵ کانفیگ جدید V2Ray</b> | <b>@ZenoraVPN</b>\n"]
+    for idx, config in enumerate(batch):
+        tag = f"Config #{base_index + idx}"
+        if config.startswith("vmess://"):
+            title = f"🔐 <b>VMESS - {tag}</b>"
+        else:
+            title = f"🔐 <b>VLESS - {tag}</b>"
 
-def mark_as_sent(conn, ids):
-    cur = conn.cursor()
-    cur.executemany("UPDATE configs SET sent = 1 WHERE id = ?", [(i,) for i in ids])
-    conn.commit()
-
-def replace_fragment(cfg, new_fragment):
-    base = cfg.split('#')[0]
-    return f"{base}#{new_fragment}"
-
-def format_message(batch):
-    lines = ["<b>📦 ۱۰ کانفیگ جدید V2Ray | @ZenoraVPN</b>\n", "<pre>"]
-    for _, cfg in batch:
-        updated = replace_fragment(cfg, FRAGMENT_NAME)
-        lines.append(updated)
-    lines.append("</pre>")
-    lines.append(f"\n<i>🕒 تاریخ: {datetime.now().strftime('%Y/%m/%d - %H:%M')}</i>")
-    lines.append("#ZenoraVPN")
+        lines.append(f"{title}\n<code>{html.escape(config)}</code>\n")
+    lines.append(f"🕒 تاریخ: {datetime.now().strftime('%Y/%m/%d - %H:%M')}\n#ZenoraVPN")
     return '\n'.join(lines)
 
-def send_to_telegram(msg):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+def send_to_telegram(message):
+    url = f'https://api.telegram.org/bot{BOT_TOKEN}/sendMessage'
     payload = {
         'chat_id': CHAT_ID,
-        'text': msg,
+        'text': message,
         'parse_mode': 'HTML',
         'disable_web_page_preview': True
     }
     r = requests.post(url, data=payload)
-    return r.status_code == 200
+    if r.status_code != 200:
+        print(f"❌ Failed to send message: {r.text}")
+    else:
+        print("✅ Message sent successfully")
 
 def main():
-    conn = init_db()
-    delete_old_configs(conn)
-    for ch in CHANNELS:
-        html = fetch_channel_html(ch)
-        configs = extract_configs(html)
-        save_new_configs(conn, configs)
-    batch = get_unsent_batch(conn, 10)
-    if not batch:
-        return
-    msg = format_message(batch)
-    if send_to_telegram(msg):
-        mark_as_sent(conn, [row[0] for row in batch])
-    conn.close()
+    seen = load_seen()
+    new_seen = set(seen)
+    all_new_configs = []
 
-if __name__ == "__main__":
+    # استخراج کانفیگ‌ها
+    for channel in channels:
+        html_text = fetch_channel_html(channel)
+        configs = extract_recent_configs(html_text)
+        for c in configs:
+            if c not in seen:
+                all_new_configs.append(c)
+                new_seen.add(c)
+
+    # دسته‌بندی به گروه‌های ۵تایی
+    batches = [all_new_configs[i:i + 5] for i in range(0, len(all_new_configs), 5)]
+
+    print(f"Found {len(all_new_configs)} new configs in total.")
+    for i, batch in enumerate(batches):
+        msg = format_batch_message(batch, base_index=i*5 + 1)
+        send_to_telegram(msg)
+        print(f"Sleeping 15 minutes before sending next batch...")
+        if i < len(batches) - 1:
+            time.sleep(900)  # 15 دقیقه بین هر پست
+
+    save_seen(new_seen)
+
+if __name__ == '__main__':
     main()
