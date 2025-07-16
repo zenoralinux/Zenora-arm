@@ -4,10 +4,9 @@ import sqlite3
 import os
 import base64
 from urllib.parse import urlparse
-from datetime import datetime, timedelta
+from datetime import datetime
 import json
 
-# ============ تنظیمات ============
 BOT_TOKEN = '7650919465:AAGDm2FtgRdjuEVclSlsEeUNaGgngcXMrCI'
 CHAT_ID = '@zenoravpn'
 CHANNELS = ['mrsoulb', 'Proxymaco']
@@ -15,13 +14,11 @@ DB_PATH = 'configs.db'
 MAX_DB_SIZE_MB = 50
 FRAGMENT_NAME = "Ch : @zenoravpn 💫📯"
 
-# ============ آماده‌سازی دیتابیس ============
 def init_db():
     if os.path.exists(DB_PATH):
         try:
             size = os.path.getsize(DB_PATH) / (1024 * 1024)
             if size > MAX_DB_SIZE_MB:
-                print("⚠️ حجم دیتابیس بیشتر از ۵۰MB است. حذف شد.")
                 os.remove(DB_PATH)
             else:
                 conn = sqlite3.connect(DB_PATH)
@@ -29,9 +26,7 @@ def init_db():
                 ensure_signature_column(conn)
                 return conn
         except Exception:
-            print("⚠️ دیتابیس خراب بود. حذف شد.")
             os.remove(DB_PATH)
-
     conn = sqlite3.connect(DB_PATH)
     conn.execute("""
         CREATE TABLE configs (
@@ -46,13 +41,16 @@ def init_db():
     return conn
 
 def ensure_signature_column(conn):
+    cur = conn.cursor()
     try:
-        conn.execute("ALTER TABLE configs ADD COLUMN signature TEXT UNIQUE")
-        conn.commit()
-    except sqlite3.OperationalError:
+        cur.execute("PRAGMA table_info(configs);")
+        cols = [row[1] for row in cur.fetchall()]
+        if 'signature' not in cols:
+            cur.execute("ALTER TABLE configs ADD COLUMN signature TEXT UNIQUE")
+            conn.commit()
+    except:
         pass
 
-# ============ استخراج کلید یونیک ============
 def extract_key_info(config):
     if config.startswith("vmess://"):
         try:
@@ -71,7 +69,6 @@ def extract_key_info(config):
             return None
     return None
 
-# ============ خواندن کانال‌ها ============
 def fetch_channel_html(channel):
     try:
         url = f"https://t.me/s/{channel}"
@@ -83,7 +80,6 @@ def fetch_channel_html(channel):
 def extract_configs(text):
     return re.findall(r'(vmess://[^\s<]+|vless://[^\s<]+)', text)
 
-# ============ ذخیره‌سازی ============
 def save_new_configs(conn, configs):
     cur = conn.cursor()
     now = datetime.utcnow()
@@ -114,7 +110,6 @@ def mark_as_sent(conn, ids):
     cur.executemany("UPDATE configs SET sent = 1 WHERE id = ?", [(i,) for i in ids])
     conn.commit()
 
-# ============ آماده‌سازی پیام ============
 def replace_fragment(cfg, new_fragment):
     base = cfg.split('#')[0]
     return f"{base}#{new_fragment}"
@@ -129,7 +124,6 @@ def format_message(batch):
     lines.append("#ZenoraVPN")
     return '\n'.join(lines)
 
-# ============ ارسال پیام ============
 def send_to_telegram(msg):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {
@@ -139,28 +133,18 @@ def send_to_telegram(msg):
         'disable_web_page_preview': True
     }
     r = requests.post(url, data=payload)
-    if r.status_code == 200:
-        print("✅ پیام با موفقیت ارسال شد.")
-        return True
-    else:
-        print(f"❌ ارسال پیام ناموفق: {r.text}")
-        return False
+    return r.status_code == 200
 
-# ============ اجرای کلی ============
 def main():
     conn = init_db()
     delete_old_configs(conn)
-
     for ch in CHANNELS:
         html = fetch_channel_html(ch)
         configs = extract_configs(html)
         save_new_configs(conn, configs)
-
     batch = get_unsent_batch(conn, 10)
     if not batch:
-        print("✅ کانفیگ جدیدی برای ارسال نیست.")
         return
-
     msg = format_message(batch)
     if send_to_telegram(msg):
         mark_as_sent(conn, [row[0] for row in batch])
